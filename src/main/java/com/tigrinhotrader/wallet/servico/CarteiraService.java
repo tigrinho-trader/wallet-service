@@ -79,6 +79,25 @@ public class CarteiraService {
     }
 
     /**
+     * Credita moedas compradas (Pix ja confirmado pelo provedor). Idempotente pela referencia (id da
+     * cobranca): consultas repetidas nunca creditam duas vezes.
+     *
+     * @return false se a compra ja tinha sido creditada
+     */
+    @Transactional
+    public boolean creditarCompra(String usuarioId, BigDecimal moedas, String referencia, String descricao) {
+        if (transacoes.existsByReferencia(referencia)) {
+            log.info("Compra {} ja creditada, ignorando", referencia);
+            return false;
+        }
+        Carteira carteira = obterOuCriar(usuarioId);
+        Instant agora = relogio.instant();
+        carteira.creditar(moedas, agora);
+        registrar(carteira, TipoTransacao.COMPRA_PIX, moedas, referencia, descricao, agora);
+        return true;
+    }
+
+    /**
      * Aplica o lucro/prejuizo de uma rodada. Idempotente pelo ordemId: a fila entrega
      * pelo menos uma vez, entao o mesmo evento pode chegar repetido.
      *
