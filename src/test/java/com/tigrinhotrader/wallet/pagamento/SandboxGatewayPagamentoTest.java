@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 class SandboxGatewayPagamentoTest {
 
-    private final SandboxGatewayPagamento sandbox = new SandboxGatewayPagamento(new BigDecimal("5000"));
+    private final SandboxGatewayPagamento sandbox = new SandboxGatewayPagamento(new BigDecimal("5000"), true);
 
     @Test
     void aprovaAteOLimite() {
@@ -25,5 +25,15 @@ class SandboxGatewayPagamentoTest {
         assertThat(r.aprovado()).isFalse();
         assertThat(r.idPagamento()).isNull();
         assertThat(r.motivo()).contains("saque").contains("5000");
+    }
+
+    @Test
+    void desabilitadoRecusaQualquerValor() {
+        SandboxGatewayPagamento desligado = new SandboxGatewayPagamento(new BigDecimal("5000"), false);
+        for (Operacao operacao : Operacao.values()) {
+            ResultadoPagamento r = desligado.processar("u1", new BigDecimal("1"), operacao);
+            assertThat(r.aprovado()).isFalse();
+            assertThat(r.motivo()).isEqualTo(SandboxGatewayPagamento.MOTIVO_DESABILITADO);
+        }
     }
 }

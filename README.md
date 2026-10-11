@@ -13,7 +13,7 @@ Saldo ficticio de cada usuario (nao movimenta dinheiro real), historico de trans
 
 ## API (via gateway: `/api/carteira`)
 
-O jogador e identificado pelo cabecalho `X-Usuario-Id` (o api-gateway vai preencher a partir do JWT do Auth0 na Etapa 3).
+O jogador e identificado pelo cabecalho `X-Usuario-Id`, preenchido pelo api-gateway a partir do `sub` do JWT do Auth0 (o gateway descarta o que vier do cliente).
 
 | Metodo | Caminho | Descricao |
 |---|---|---|
@@ -21,6 +21,10 @@ O jogador e identificado pelo cabecalho `X-Usuario-Id` (o api-gateway vai preenc
 | GET | `/carteira/extrato` | Transacoes, mais recentes primeiro |
 | POST | `/carteira/depositos` | `{"valor":100}` deposito sandbox (recusa acima de 5.000 por operacao) |
 | POST | `/carteira/saques` | `{"valor":100}` saque sandbox (422 se faltar saldo) |
+
+Com `WALLET_SANDBOX_HABILITADO=false` (`wallet.sandbox.habilitado`) depositos e saques respondem 422 "Pagamentos desabilitados": e o interruptor para desligar o sandbox antes de plugar um provedor real (Pix) no lugar do `SandboxGatewayPagamento`.
+
+As rodadas do Flecha Certeira chegam pelo mesmo evento `ordem.executada` (tipo `FLECHA_CERTEIRA`, simbolo = campo), publicado pelo trading-service ao encerrar a sessao.
 
 Consumo de `ordem.executada` (fila duravel `wallet.ordem-executada`):
 

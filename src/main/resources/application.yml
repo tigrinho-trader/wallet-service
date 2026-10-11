@@ -31,6 +31,8 @@ mensageria:
 wallet:
   saldo-inicial: 1000.00
   sandbox:
+    # false desliga depositos/saques de mentira (antes de plugar o Pix de verdade)
+    habilitado: ${WALLET_SANDBOX_HABILITADO:true}
     limite-por-operacao: 5000.00
 
 management:
