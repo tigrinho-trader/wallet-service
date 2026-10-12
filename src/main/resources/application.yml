@@ -38,7 +38,7 @@ wallet:
   pix:
     chave-api: ${ABACATEPAY_API_KEY:}
     url: ${ABACATEPAY_URL:https://api.abacatepay.com/v2}
-    centavos-por-moeda: ${PIX_CENTAVOS_POR_MOEDA:1}
+    centavos-por-moeda: ${PIX_CENTAVOS_POR_MOEDA:10}
     expira-em-segundos: 1800
 
 management:

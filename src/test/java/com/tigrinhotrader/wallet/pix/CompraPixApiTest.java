@@ -82,7 +82,7 @@ class CompraPixApiTest {
                 .andExpect(jsonPath("$.sandboxHabilitado").value(true))
                 .andExpect(jsonPath("$.pacotes", hasSize(4)))
                 .andExpect(jsonPath("$.pacotes[2]").value(1000))
-                .andExpect(jsonPath("$.centavosPorMoeda").value(1));
+                .andExpect(jsonPath("$.centavosPorMoeda").value(10));
     }
 
     @Test
@@ -90,13 +90,13 @@ class CompraPixApiTest {
         comprar(usuario, "{\"moedas\":500}")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.moedas").value(500))
-                .andExpect(jsonPath("$.centavos").value(500))
+                .andExpect(jsonPath("$.centavos").value(5000))
                 .andExpect(jsonPath("$.status").value("PENDENTE"))
                 .andExpect(jsonPath("$.brCode").value("000201brcode"))
                 .andExpect(jsonPath("$.brCodeBase64").value("data:image/png;base64,QR"))
                 .andExpect(jsonPath("$.devMode").value(true))
                 .andExpect(jsonPath("$.saldo").value(nullValue()));
-        verify(provedor).criar(anyString(), eq(500L), eq("Flecha Certeira: 500 moedas"), eq(1800));
+        verify(provedor).criar(anyString(), eq(5000L), eq("Flecha Certeira: 500 moedas"), eq(1800));
     }
 
     @Test
