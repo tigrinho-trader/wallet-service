@@ -30,18 +30,24 @@ public class CompraPixController {
     private final CarteiraService carteiras;
     private final PixProperties propriedades;
     private final boolean sandboxHabilitado;
+    private final int limiteSandbox;
 
     public CompraPixController(CompraPixService compras, CarteiraService carteiras, PixProperties propriedades,
-                               @Value("${wallet.sandbox.habilitado:true}") boolean sandboxHabilitado) {
+                               @Value("${wallet.sandbox.habilitado:true}") boolean sandboxHabilitado,
+                               @Value("${wallet.sandbox.limite-por-operacao:5000.00}") BigDecimal limiteSandbox) {
         this.compras = compras;
         this.carteiras = carteiras;
         this.propriedades = propriedades;
         this.sandboxHabilitado = sandboxHabilitado;
+        this.limiteSandbox = limiteSandbox.intValue();
     }
 
-    /** O que o frontend precisa para montar a loja de moedas. */
+    /**
+     * O que o frontend precisa para montar a loja de moedas. {@code minimoMoedas}/{@code maximoMoedas} valem
+     * para o modo ativo: os limites do Pix, ou o limite do deposito de teste quando o Pix esta desligado.
+     */
     public record ConfigResponse(boolean pixHabilitado, boolean sandboxHabilitado, List<Integer> pacotes,
-                                 int centavosPorMoeda) {
+                                 int centavosPorMoeda, int minimoMoedas, int maximoMoedas) {
     }
 
     public record NovaCompraRequest(@NotNull Integer moedas) {
@@ -55,8 +61,9 @@ public class CompraPixController {
 
     @GetMapping("/config")
     public ConfigResponse config() {
-        return new ConfigResponse(compras.habilitado(), sandboxHabilitado, propriedades.pacotes(),
-                propriedades.centavosPorMoeda());
+        boolean pix = compras.habilitado();
+        return new ConfigResponse(pix, sandboxHabilitado, propriedades.pacotes(), propriedades.centavosPorMoeda(),
+                pix ? propriedades.minimoMoedas() : 1, pix ? propriedades.maximoMoedas() : limiteSandbox);
     }
 
     @PostMapping

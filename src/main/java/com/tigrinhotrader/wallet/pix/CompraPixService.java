@@ -41,8 +41,9 @@ public class CompraPixService {
         if (!habilitado()) {
             throw new PixIndisponivelException("Compra por Pix desligada (ABACATEPAY_API_KEY nao configurada)");
         }
-        if (!propriedades.pacotes().contains(moedas)) {
-            throw new RegraNegocioException("Pacote invalido: escolha entre " + propriedades.pacotes() + " moedas");
+        if (moedas < propriedades.minimoMoedas() || moedas > propriedades.maximoMoedas()) {
+            throw new RegraNegocioException("Quantidade invalida: compre de " + propriedades.minimoMoedas()
+                    + " a " + propriedades.maximoMoedas() + " moedas");
         }
         if (compras.countByUsuarioIdAndStatus(usuarioId, ProvedorPix.StatusCobranca.PENDENTE) >= propriedades.maxPendentes()) {
             throw new RegraNegocioException("Voce ja tem " + propriedades.maxPendentes()

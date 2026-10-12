@@ -82,7 +82,9 @@ class CompraPixApiTest {
                 .andExpect(jsonPath("$.sandboxHabilitado").value(true))
                 .andExpect(jsonPath("$.pacotes", hasSize(4)))
                 .andExpect(jsonPath("$.pacotes[2]").value(1000))
-                .andExpect(jsonPath("$.centavosPorMoeda").value(10));
+                .andExpect(jsonPath("$.centavosPorMoeda").value(10))
+                .andExpect(jsonPath("$.minimoMoedas").value(10))
+                .andExpect(jsonPath("$.maximoMoedas").value(10000));
     }
 
     @Test
@@ -100,10 +102,24 @@ class CompraPixApiTest {
     }
 
     @Test
-    void pacoteForaDaListaE422() throws Exception {
+    void aceitaQualquerQuantidadeEntreOMinimoEOMaximo() throws Exception {
         comprar(usuario, "{\"moedas\":123}")
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Pacote invalido")));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.moedas").value(123))
+                .andExpect(jsonPath("$.centavos").value(1230));
+        comprar(usuario, "{\"moedas\":10}").andExpect(status().isCreated());
+        comprar(usuario, "{\"moedas\":10000}").andExpect(status().isCreated());
+        verify(provedor).criar(anyString(), eq(1230L), eq("Flecha Certeira: 123 moedas"), eq(1800));
+    }
+
+    @Test
+    void quantidadeForaDosLimitesE422() throws Exception {
+        for (int moedas : new int[] {9, 0, -50, 10001}) {
+            comprar(usuario, "{\"moedas\":" + moedas + "}")
+                    .andExpect(status().isUnprocessableEntity())
+                    .andExpect(jsonPath("$.detail").value(
+                            org.hamcrest.Matchers.containsString("compre de 10 a 10000 moedas")));
+        }
         verify(provedor, never()).criar(anyString(), anyLong(), anyString(), anyInt());
     }
 
@@ -121,7 +137,10 @@ class CompraPixApiTest {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("ABACATEPAY_API_KEY")));
         mockMvc.perform(get("/carteira/compras/config").header("X-Usuario-Id", usuario))
-                .andExpect(jsonPath("$.pixHabilitado").value(false));
+                .andExpect(jsonPath("$.pixHabilitado").value(false))
+                // sem Pix, os limites sao os do deposito de teste
+                .andExpect(jsonPath("$.minimoMoedas").value(1))
+                .andExpect(jsonPath("$.maximoMoedas").value(5000));
     }
 
     @Test
