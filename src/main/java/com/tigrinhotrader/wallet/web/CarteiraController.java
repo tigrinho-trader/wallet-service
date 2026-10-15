@@ -4,6 +4,8 @@ import com.tigrinhotrader.wallet.dominio.Carteira;
 import com.tigrinhotrader.wallet.dominio.TipoTransacao;
 import com.tigrinhotrader.wallet.dominio.Transacao;
 import com.tigrinhotrader.wallet.servico.CarteiraService;
+import com.tigrinhotrader.wallet.binance.BinanceSubconta;
+import com.tigrinhotrader.wallet.binance.BinanceSubcontaService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -27,9 +29,11 @@ public class CarteiraController {
     static final String CABECALHO_USUARIO = "X-Usuario-Id";
 
     private final CarteiraService carteiraService;
+    private final BinanceSubcontaService binanceSubcontaService;
 
-    public CarteiraController(CarteiraService carteiraService) {
+    public CarteiraController(CarteiraService carteiraService, BinanceSubcontaService binanceSubcontaService) {
         this.carteiraService = carteiraService;
+        this.binanceSubcontaService = binanceSubcontaService;
     }
 
     public record CarteiraResponse(String usuarioId, BigDecimal saldo, Instant atualizadaEm) {
@@ -70,5 +74,16 @@ public class CarteiraController {
     public CarteiraResponse sacar(@RequestHeader(CABECALHO_USUARIO) String usuarioId,
                                   @Valid @RequestBody OperacaoRequest pedido) {
         return CarteiraResponse.de(carteiraService.sacar(usuarioId, pedido.valor()));
+    }
+
+    public record SubcontaResponse(String subaccountId, String email, String tag, Instant criadaEm) {
+        static SubcontaResponse de(BinanceSubconta s) {
+            return new SubcontaResponse(s.getSubaccountId(), s.getEmail(), s.getTag(), s.getCriadaEm());
+        }
+    }
+
+    @GetMapping("/binance/subconta")
+    public SubcontaResponse subconta(@RequestHeader(CABECALHO_USUARIO) String usuarioId) {
+        return SubcontaResponse.de(binanceSubcontaService.obterOuCriar(usuarioId));
     }
 }

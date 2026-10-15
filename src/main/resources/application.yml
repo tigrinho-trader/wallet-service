@@ -34,6 +34,8 @@ wallet:
     # false desliga depositos/saques de mentira (antes de plugar o Pix de verdade)
     habilitado: ${WALLET_SANDBOX_HABILITADO:true}
     limite-por-operacao: 5000.00
+  binance:
+    url: ${BINANCE_URL:https://api.binance.com}
   # Compra de moedas por Pix (AbacatePay). Sem chave = desligado. A chave vem SO do ambiente.
   pix:
     chave-api: ${ABACATEPAY_API_KEY:}

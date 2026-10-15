@@ -9,6 +9,8 @@ import com.tigrinhotrader.wallet.mensageria.OrdemExecutadaEvento;
 import com.tigrinhotrader.wallet.pagamento.GatewayPagamento;
 import com.tigrinhotrader.wallet.pagamento.GatewayPagamento.Operacao;
 import com.tigrinhotrader.wallet.pagamento.GatewayPagamento.ResultadoPagamento;
+import com.tigrinhotrader.wallet.binance.BinanceSubcontaService;
+import com.tigrinhotrader.wallet.dominio.SaldoInsuficienteException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,15 +31,21 @@ public class CarteiraService {
     private final GatewayPagamento gatewayPagamento;
     private final Clock relogio;
     private final BigDecimal saldoInicial;
+    private final BinanceSubcontaService binanceSubcontaService;
+    private final boolean binanceHabilitada;
 
     public CarteiraService(CarteiraRepository carteiras, TransacaoRepository transacoes,
                            GatewayPagamento gatewayPagamento, Clock relogio,
-                           @Value("${wallet.saldo-inicial:1000.00}") BigDecimal saldoInicial) {
+                           @Value("${wallet.saldo-inicial:1000.00}") BigDecimal saldoInicial,
+                           BinanceSubcontaService binanceSubcontaService,
+                           @Value("${BINANCE_SUBCONTAS_HABILITADO:false}") boolean binanceHabilitada) {
         this.carteiras = carteiras;
         this.transacoes = transacoes;
         this.gatewayPagamento = gatewayPagamento;
         this.relogio = relogio;
         this.saldoInicial = saldoInicial;
+        this.binanceSubcontaService = binanceSubcontaService;
+        this.binanceHabilitada = binanceHabilitada;
     }
 
     /** Todo jogador novo ganha um bonus de fichas ficticias no primeiro acesso. */
@@ -72,6 +80,15 @@ public class CarteiraService {
     public Carteira sacar(String usuarioId, BigDecimal valor) {
         Carteira carteira = obterOuCriar(usuarioId);
         Instant agora = relogio.instant();
+        if (binanceHabilitada) {
+            if (valor == null || valor.signum() <= 0) throw new IllegalArgumentException("Valor precisa ser positivo");
+            if (carteira.getSaldo().compareTo(valor) < 0) throw new SaldoInsuficienteException(carteira.getSaldo());
+            BigDecimal btc = binanceSubcontaService.enviarBonus(usuarioId, valor);
+            carteira.debitar(valor, agora);
+            registrar(carteira, TipoTransacao.SAQUE, valor.negate(), "binance-btc-" + btc,
+                    "Saque Binance: " + btc.toPlainString() + " BTC", agora);
+            return carteira;
+        }
         carteira.debitar(valor, agora);
         ResultadoPagamento pagamento = aprovar(usuarioId, valor, Operacao.SAQUE);
         registrar(carteira, TipoTransacao.SAQUE, valor.negate(), pagamento.idPagamento(), "Saque sandbox", agora);
