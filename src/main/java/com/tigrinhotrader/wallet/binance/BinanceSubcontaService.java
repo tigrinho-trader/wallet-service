@@ -12,18 +12,29 @@ import org.springframework.transaction.annotation.Transactional;
 public class BinanceSubcontaService {
     private final BinanceSubcontaRepository repositorio;
     private final BinanceLinkClient binance;
+    private final BinanceStandardClient binancePadrao;
     private final Clock clock;
+    private final String modo;
 
-    public BinanceSubcontaService(BinanceSubcontaRepository repositorio, BinanceLinkClient binance, Clock clock) {
+    public BinanceSubcontaService(BinanceSubcontaRepository repositorio, BinanceLinkClient binance,
+                                  BinanceStandardClient binancePadrao, Clock clock,
+                                  @org.springframework.beans.factory.annotation.Value("${BINANCE_SUBCONTAS_MODO:LINK}") String modo) {
         this.repositorio = repositorio;
         this.binance = binance;
+        this.binancePadrao = binancePadrao;
         this.clock = clock;
+        this.modo = modo;
     }
 
     @Transactional
     public BinanceSubconta obterOuCriar(String usuarioId) {
         return repositorio.findByUsuarioId(usuarioId).orElseGet(() -> {
             String tag = tagPara(usuarioId);
+            if (modo.equalsIgnoreCase("STANDARD")) {
+                BinanceStandardClient.SubcontaResposta resposta = binancePadrao.criarSubconta(tag);
+                return repositorio.save(new BinanceSubconta(usuarioId, resposta.email(), resposta.email(),
+                        tag, clock.instant()));
+            }
             BinanceLinkClient.SubcontaResposta resposta = binance.criarSubconta(tag);
             return repositorio.save(new BinanceSubconta(usuarioId, resposta.subaccountId(), resposta.email(),
                     resposta.tag(), clock.instant()));
@@ -35,10 +46,19 @@ public class BinanceSubcontaService {
         BigDecimal brl = moedas.divide(BigDecimal.TEN, 2, RoundingMode.DOWN);
         BigDecimal btc = brl.divide(binance.precoBtcEmReais(), 8, RoundingMode.DOWN);
         if (btc.signum() <= 0) throw new IllegalArgumentException("Valor insuficiente para enviar BTC");
-        BinanceLinkClient.TransferenciaResposta transferencia = binance.transferirParaSubconta(
-                subconta.getSubaccountId(), btc, UUID.randomUUID().toString().replace("-", "").substring(0, 32));
-        if (transferencia == null || !transferencia.success()) {
-            throw new IllegalStateException("A Binance nao confirmou a transferencia");
+        String referencia = UUID.randomUUID().toString().replace("-", "").substring(0, 32);
+        if (modo.equalsIgnoreCase("STANDARD")) {
+            BinanceStandardClient.TransferenciaResposta transferencia = binancePadrao.transferirParaSubconta(
+                    subconta.getEmail(), btc, referencia);
+            if (transferencia == null || transferencia.tranId() == null) {
+                throw new IllegalStateException("A Binance nao confirmou a transferencia");
+            }
+        } else {
+            BinanceLinkClient.TransferenciaResposta transferencia = binance.transferirParaSubconta(
+                    subconta.getSubaccountId(), btc, referencia);
+            if (transferencia == null || !transferencia.success()) {
+                throw new IllegalStateException("A Binance nao confirmou a transferencia");
+            }
         }
         return btc;
     }
