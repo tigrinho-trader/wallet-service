@@ -17,10 +17,26 @@ O jogador e identificado pelo cabecalho `X-Usuario-Id`, preenchido pelo api-gate
 
 | Metodo | Caminho | Descricao |
 |---|---|---|
-| GET | `/carteira` | Saldo. No primeiro acesso cria a carteira com 1.000 moedas de boas-vindas |
+| GET | `/carteira` | Saldo. No primeiro acesso cria a carteira com `CARTEIRA_SALDO_INICIAL` moedas (padrao 0; com valor acima de 0 entra no extrato como `BONUS_INICIAL`) |
 | GET | `/carteira/extrato` | Transacoes, mais recentes primeiro |
 | POST | `/carteira/depositos` | `{"valor":100}` deposito sandbox (recusa acima de 5.000 por operacao) |
 | POST | `/carteira/saques` | `{"valor":100}` saque sandbox (422 se faltar saldo) |
+| POST | `/carteira/cupons` | `{"codigo":"30COINS"}` resgata o cupom configurado. 200 `{"moedas":30.00,"saldo":1030.00}`; 422 `Cupom invalido`; 409 `Cupom ja usado nesta conta` |
+
+O saldo inicial vale so para carteiras criadas depois da mudanca: as que ja existem continuam com o saldo que tem.
+
+### Cupom de moedas
+
+- Codigo comparado sem espacos nas pontas e sem diferenciar maiusculas (`30coins` = `30COINS`).
+- Cada conta resgata uma vez: o credito vira uma transacao `CUPOM` com referencia unica `cupom:<CODIGO>:<usuarioId>`, entao dois pedidos ao mesmo tempo creditam uma vez so (o segundo recebe 409).
+- Aparece no `GET /carteira/extrato` com a descricao `Cupom <CODIGO>`.
+- Com `CUPOM_CODIGO` vazio ou `CUPOM_MOEDAS` menor ou igual a 0, nenhum codigo vale (422).
+
+| Variavel | Padrao | Uso |
+|---|---|---|
+| `CARTEIRA_SALDO_INICIAL` | `0` | moedas de cada carteira nova (`wallet.saldo-inicial`) |
+| `CUPOM_CODIGO` | vazio (sem cupom) | codigo do cupom (`wallet.cupom.codigo`) |
+| `CUPOM_MOEDAS` | `0` | moedas creditadas pelo cupom (`wallet.cupom.moedas`) |
 
 Com `WALLET_SANDBOX_HABILITADO=false` (`wallet.sandbox.habilitado`) depositos e saques respondem 422 "Pagamentos desabilitados": e o interruptor para desligar o sandbox antes de plugar um provedor real (Pix) no lugar do `SandboxGatewayPagamento`.
 
@@ -29,7 +45,7 @@ Com `WALLET_SANDBOX_HABILITADO=false` (`wallet.sandbox.habilitado`) depositos e 
 | Metodo | Caminho | Descricao |
 |---|---|---|
 | GET | `/carteira/compras/config` | `{pixHabilitado, sandboxHabilitado, pacotes, centavosPorMoeda, minimoMoedas, maximoMoedas}` (limites do modo ativo: Pix ou deposito de teste) |
-| POST | `/carteira/compras` | `{"moedas":500}` cria a cobranca Pix (qualquer quantidade entre `wallet.pix.minimo-moedas` e `wallet.pix.maximo-moedas`, padrao 10 a 10.000; `wallet.pix.pacotes` sao so sugestoes da loja) e devolve QR Code (`brCodeBase64`) e copia e cola (`brCode`). 422 quantidade invalida ou cobrancas em aberto demais; 503 sem chave/provedor fora do ar |
+| POST | `/carteira/compras` | `{"moedas":500}` cria a cobranca Pix (qualquer quantidade entre `wallet.pix.minimo-moedas` e `wallet.pix.maximo-moedas`, padrao 5 a 2.000; `wallet.pix.pacotes` sao so sugestoes da loja, padrao 10, 25, 50 e 100) e devolve QR Code (`brCodeBase64`) e copia e cola (`brCode`). 422 quantidade invalida ou cobrancas em aberto demais; 503 sem chave/provedor fora do ar |
 | GET | `/carteira/compras/{id}` | Status da compra. Se pendente, o servidor consulta o AbacatePay; quando vira `PAGA` credita as moedas **uma unica vez** (transacao `COMPRA_PIX`, referencia = id da cobranca) e devolve o `saldo` |
 | POST | `/carteira/compras/{id}/simular-pagamento` | So em modo de desenvolvimento (chave `abc_dev_`): paga a cobranca de teste no AbacatePay e credita |
 
@@ -41,7 +57,7 @@ confirmacao.
 |---|---|---|
 | `ABACATEPAY_API_KEY` | vazio (Pix desligado) | chave da API. **Nunca** no repositorio: so no ambiente / `.env` ignorado pelo git |
 | `ABACATEPAY_URL` | `https://api.abacatepay.com/v2` | base da API |
-| `PIX_CENTAVOS_POR_MOEDA` | `10` | preco de cada moeda (10 centavos = 10 moedas por R$ 1,00) |
+| `PIX_CENTAVOS_POR_MOEDA` | `100` | preco de cada moeda em centavos (100 = 1 moeda por R$ 1,00). Saldos ja existentes nao sao convertidos |
 
 Teste ao vivo com o AbacatePay (modo dev, sem dinheiro real): `ABACATEPAY_API_KEY=abc_dev_... mvn test -Dtest=AbacatePayAoVivoTest`.
 
@@ -59,7 +75,7 @@ Consumo de `ordem.executada` (fila duravel `wallet.ordem-executada`):
 mvn verify            # testes + relatorio Jacoco (target/site/jacoco); falha abaixo de 80% de linhas
 ```
 
-Variaveis: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `RABBITMQ_HOST`. Ambiente completo: `docker-compose.yml` do repo `api-gateway`.
+Variaveis: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `RABBITMQ_HOST`, `CARTEIRA_SALDO_INICIAL`, `CUPOM_CODIGO`, `CUPOM_MOEDAS`. Ambiente completo: `docker-compose.yml` do repo `api-gateway`.
 
 ## Repositorios do projeto
 

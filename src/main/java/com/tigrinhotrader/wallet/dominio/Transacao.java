@@ -12,8 +12,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Linha do extrato. {@code referencia} e unica: e o ordemId (rodadas) ou o id do
- * pagamento sandbox, e garante que o mesmo evento nunca e aplicado duas vezes.
+ * Linha do extrato. {@code referencia} e unica: e o ordemId (rodadas), o id do pagamento sandbox ou
+ * {@code cupom:CODIGO:usuario} (cupons), e garante que o mesmo evento nunca e aplicado duas vezes.
  */
 @Entity
 @Table(name = "transacoes", indexes = @Index(name = "idx_transacoes_usuario", columnList = "usuarioId, criadaEm"))

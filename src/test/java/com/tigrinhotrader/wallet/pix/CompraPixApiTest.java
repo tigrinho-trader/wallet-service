@@ -81,24 +81,26 @@ class CompraPixApiTest {
                 .andExpect(jsonPath("$.pixHabilitado").value(true))
                 .andExpect(jsonPath("$.sandboxHabilitado").value(true))
                 .andExpect(jsonPath("$.pacotes", hasSize(4)))
-                .andExpect(jsonPath("$.pacotes[2]").value(1000))
-                .andExpect(jsonPath("$.centavosPorMoeda").value(10))
-                .andExpect(jsonPath("$.minimoMoedas").value(10))
-                .andExpect(jsonPath("$.maximoMoedas").value(10000));
+                .andExpect(jsonPath("$.pacotes[0]").value(10))
+                .andExpect(jsonPath("$.pacotes[3]").value(100))
+                // 1 real = 1 moeda
+                .andExpect(jsonPath("$.centavosPorMoeda").value(100))
+                .andExpect(jsonPath("$.minimoMoedas").value(5))
+                .andExpect(jsonPath("$.maximoMoedas").value(2000));
     }
 
     @Test
     void criaACobrancaComOValorDoPacote() throws Exception {
-        comprar(usuario, "{\"moedas\":500}")
+        comprar(usuario, "{\"moedas\":50}")
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.moedas").value(500))
+                .andExpect(jsonPath("$.moedas").value(50))
                 .andExpect(jsonPath("$.centavos").value(5000))
                 .andExpect(jsonPath("$.status").value("PENDENTE"))
                 .andExpect(jsonPath("$.brCode").value("000201brcode"))
                 .andExpect(jsonPath("$.brCodeBase64").value("data:image/png;base64,QR"))
                 .andExpect(jsonPath("$.devMode").value(true))
                 .andExpect(jsonPath("$.saldo").value(nullValue()));
-        verify(provedor).criar(anyString(), eq(5000L), eq("Flecha Certeira: 500 moedas"), eq(1800));
+        verify(provedor).criar(anyString(), eq(5000L), eq("Flecha Certeira: 50 moedas"), eq(1800));
     }
 
     @Test
@@ -106,19 +108,19 @@ class CompraPixApiTest {
         comprar(usuario, "{\"moedas\":123}")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.moedas").value(123))
-                .andExpect(jsonPath("$.centavos").value(1230));
-        comprar(usuario, "{\"moedas\":10}").andExpect(status().isCreated());
-        comprar(usuario, "{\"moedas\":10000}").andExpect(status().isCreated());
-        verify(provedor).criar(anyString(), eq(1230L), eq("Flecha Certeira: 123 moedas"), eq(1800));
+                .andExpect(jsonPath("$.centavos").value(12300));
+        comprar(usuario, "{\"moedas\":5}").andExpect(status().isCreated());
+        comprar(usuario, "{\"moedas\":2000}").andExpect(status().isCreated());
+        verify(provedor).criar(anyString(), eq(12300L), eq("Flecha Certeira: 123 moedas"), eq(1800));
     }
 
     @Test
     void quantidadeForaDosLimitesE422() throws Exception {
-        for (int moedas : new int[] {9, 0, -50, 10001}) {
+        for (int moedas : new int[] {4, 0, -50, 2001}) {
             comprar(usuario, "{\"moedas\":" + moedas + "}")
                     .andExpect(status().isUnprocessableEntity())
                     .andExpect(jsonPath("$.detail").value(
-                            org.hamcrest.Matchers.containsString("compre de 10 a 10000 moedas")));
+                            org.hamcrest.Matchers.containsString("compre de 5 a 2000 moedas")));
         }
         verify(provedor, never()).criar(anyString(), anyLong(), anyString(), anyInt());
     }

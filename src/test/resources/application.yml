@@ -13,6 +13,10 @@ spring:
         auto-startup: false
 
 wallet:
+  # nos testes as carteiras novas comecam com 1000 (em producao o padrao e 0, env CARTEIRA_SALDO_INICIAL)
   saldo-inicial: 1000.00
+  cupom:
+    codigo: 30COINS
+    moedas: 30
   sandbox:
     limite-por-operacao: 5000.00

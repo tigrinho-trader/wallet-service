@@ -7,5 +7,6 @@ public enum TipoTransacao {
     SAQUE,
     GANHO_RODADA,
     PERDA_RODADA,
-    EMPATE_RODADA
+    EMPATE_RODADA,
+    CUPOM
 }

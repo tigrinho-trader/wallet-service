@@ -36,26 +36,32 @@ public class CarteiraService {
 
     public CarteiraService(CarteiraRepository carteiras, TransacaoRepository transacoes,
                            GatewayPagamento gatewayPagamento, Clock relogio,
-                           @Value("${wallet.saldo-inicial:1000.00}") BigDecimal saldoInicial,
+                           @Value("${wallet.saldo-inicial:0}") BigDecimal saldoInicial,
                            BinanceSubcontaService binanceSubcontaService,
                            @Value("${BINANCE_SUBCONTAS_HABILITADO:false}") boolean binanceHabilitada) {
         this.carteiras = carteiras;
         this.transacoes = transacoes;
         this.gatewayPagamento = gatewayPagamento;
         this.relogio = relogio;
-        this.saldoInicial = saldoInicial;
+        // env vazia ou negativa = sem bonus
+        this.saldoInicial = saldoInicial == null ? BigDecimal.ZERO : saldoInicial.max(BigDecimal.ZERO);
         this.binanceSubcontaService = binanceSubcontaService;
         this.binanceHabilitada = binanceHabilitada;
     }
 
-    /** Todo jogador novo ganha um bonus de fichas ficticias no primeiro acesso. */
+    /**
+     * No primeiro acesso cria a carteira com {@code wallet.saldo-inicial} moedas (env CARTEIRA_SALDO_INICIAL).
+     * So vale para carteiras novas; com 0 nao ha bonus e nada entra no extrato.
+     */
     @Transactional
     public Carteira obterOuCriar(String usuarioId) {
         return carteiras.findById(usuarioId).orElseGet(() -> {
             Instant agora = relogio.instant();
             Carteira nova = carteiras.save(new Carteira(usuarioId, saldoInicial, agora));
-            transacoes.save(new Transacao(usuarioId, TipoTransacao.BONUS_INICIAL, nova.getSaldo(), nova.getSaldo(),
-                    null, "Bonus de boas-vindas", agora));
+            if (nova.getSaldo().signum() > 0) {
+                transacoes.save(new Transacao(usuarioId, TipoTransacao.BONUS_INICIAL, nova.getSaldo(), nova.getSaldo(),
+                        null, "Bonus de boas-vindas", agora));
+            }
             return nova;
         });
     }
@@ -112,6 +118,27 @@ public class CarteiraService {
         carteira.creditar(moedas, agora);
         registrar(carteira, TipoTransacao.COMPRA_PIX, moedas, referencia, descricao, agora);
         return true;
+    }
+
+    /**
+     * Credita um cupom. Cada conta resgata uma vez: a referencia ({@code cupom:CODIGO:usuario}) e unica no banco.
+     * O saveAndFlush grava a transacao aqui dentro, entao uma corrida com outro pedido igual aparece como
+     * violacao de unicidade ao sair do metodo (quem chama trata, ver {@link CupomService}).
+     *
+     * @throws CupomJaUsadoException se a conta ja resgatou este cupom
+     */
+    @Transactional
+    public Carteira creditarCupom(String usuarioId, BigDecimal moedas, String referencia, String descricao) {
+        if (transacoes.existsByReferencia(referencia)) {
+            throw new CupomJaUsadoException();
+        }
+        Carteira carteira = obterOuCriar(usuarioId);
+        Instant agora = relogio.instant();
+        carteira.creditar(moedas, agora);
+        carteiras.save(carteira);
+        transacoes.saveAndFlush(new Transacao(usuarioId, TipoTransacao.CUPOM, moedas, carteira.getSaldo(), referencia,
+                descricao, agora));
+        return carteira;
     }
 
     /**

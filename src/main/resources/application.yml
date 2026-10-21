@@ -29,7 +29,12 @@ mensageria:
   exchange: tigrinho.eventos
 
 wallet:
-  saldo-inicial: 1000.00
+  # Moedas de boas-vindas de cada carteira NOVA (as que ja existem nao mudam). 0 = sem bonus.
+  saldo-inicial: ${CARTEIRA_SALDO_INICIAL:0}
+  # Cupom de moedas: cada conta resgata uma vez. Codigo vazio ou moedas <= 0 = nenhum cupom vale.
+  cupom:
+    codigo: ${CUPOM_CODIGO:}
+    moedas: ${CUPOM_MOEDAS:0}
   sandbox:
     # false desliga depositos/saques de mentira (antes de plugar o Pix de verdade)
     habilitado: ${WALLET_SANDBOX_HABILITADO:true}
@@ -40,7 +45,7 @@ wallet:
   pix:
     chave-api: ${ABACATEPAY_API_KEY:}
     url: ${ABACATEPAY_URL:https://api.abacatepay.com/v2}
-    centavos-por-moeda: ${PIX_CENTAVOS_POR_MOEDA:10}
+    centavos-por-moeda: ${PIX_CENTAVOS_POR_MOEDA:100}
     expira-em-segundos: 1800
 
 management:

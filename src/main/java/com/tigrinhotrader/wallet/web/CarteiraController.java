@@ -4,6 +4,7 @@ import com.tigrinhotrader.wallet.dominio.Carteira;
 import com.tigrinhotrader.wallet.dominio.TipoTransacao;
 import com.tigrinhotrader.wallet.dominio.Transacao;
 import com.tigrinhotrader.wallet.servico.CarteiraService;
+import com.tigrinhotrader.wallet.servico.CupomService;
 import com.tigrinhotrader.wallet.binance.BinanceSubconta;
 import com.tigrinhotrader.wallet.binance.BinanceSubcontaService;
 import jakarta.validation.Valid;
@@ -30,10 +31,13 @@ public class CarteiraController {
 
     private final CarteiraService carteiraService;
     private final BinanceSubcontaService binanceSubcontaService;
+    private final CupomService cupomService;
 
-    public CarteiraController(CarteiraService carteiraService, BinanceSubcontaService binanceSubcontaService) {
+    public CarteiraController(CarteiraService carteiraService, BinanceSubcontaService binanceSubcontaService,
+                              CupomService cupomService) {
         this.carteiraService = carteiraService;
         this.binanceSubcontaService = binanceSubcontaService;
+        this.cupomService = cupomService;
     }
 
     public record CarteiraResponse(String usuarioId, BigDecimal saldo, Instant atualizadaEm) {
@@ -80,6 +84,21 @@ public class CarteiraController {
         static SubcontaResponse de(BinanceSubconta s) {
             return new SubcontaResponse(s.getSubaccountId(), s.getEmail(), s.getTag(), s.getCriadaEm());
         }
+    }
+
+    /** Codigo vazio ou ausente cai no 422 "Cupom invalido" do servico, igual a um codigo errado. */
+    public record CupomRequest(String codigo) {
+    }
+
+    public record CupomResponse(BigDecimal moedas, BigDecimal saldo) {
+    }
+
+    /** 200 com as moedas creditadas e o saldo; 422 cupom invalido; 409 se a conta ja usou o cupom. */
+    @PostMapping("/cupons")
+    public CupomResponse resgatarCupom(@RequestHeader(CABECALHO_USUARIO) String usuarioId,
+                                       @RequestBody CupomRequest pedido) {
+        CupomService.Resgate resgate = cupomService.resgatar(usuarioId, pedido.codigo());
+        return new CupomResponse(resgate.moedas(), resgate.saldo());
     }
 
     @GetMapping("/binance/subconta")
