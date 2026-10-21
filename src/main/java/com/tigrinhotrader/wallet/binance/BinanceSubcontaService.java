@@ -43,7 +43,8 @@ public class BinanceSubcontaService {
 
     public BigDecimal enviarBonus(String usuarioId, BigDecimal moedas) {
         BinanceSubconta subconta = obterOuCriar(usuarioId);
-        BigDecimal brl = moedas.divide(BigDecimal.TEN, 2, RoundingMode.DOWN);
+        // 1 moeda = R$ 1 (mesma cotacao da compra por Pix)
+        BigDecimal brl = moedas.setScale(2, RoundingMode.DOWN);
         BigDecimal btc = brl.divide(binance.precoBtcEmReais(), 8, RoundingMode.DOWN);
         if (btc.signum() <= 0) throw new IllegalArgumentException("Valor insuficiente para enviar BTC");
         String referencia = UUID.randomUUID().toString().replace("-", "").substring(0, 32);

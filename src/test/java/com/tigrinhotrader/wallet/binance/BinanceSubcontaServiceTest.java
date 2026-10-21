@@ -111,6 +111,8 @@ class BinanceSubcontaServiceTest {
 
         BigDecimal btc = servico("STANDARD").enviarBonus("u4", new BigDecimal("100"));
 
+        // 100 moedas = R$ 100 (1:1) / R$ 300.000 por BTC
+        assertThat(btc).isEqualByComparingTo("0.00033333");
         verify(padrao).transferirParaSubconta(eq("s@virtual"), eq(btc), anyString());
     }
 
@@ -132,7 +134,7 @@ class BinanceSubcontaServiceTest {
     void valorPequenoDemaisNaoTransfere() {
         when(link.criarSubconta(anyString())).thenReturn(new BinanceLinkClient.SubcontaResposta("sub-6", "e", "t"));
 
-        assertThatThrownBy(() -> servico("LINK").enviarBonus("u6", new BigDecimal("0.01")))
+        assertThatThrownBy(() -> servico("LINK").enviarBonus("u6", new BigDecimal("0.001")))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("insuficiente");
         verify(link, never()).transferirParaSubconta(anyString(), any(), anyString());
