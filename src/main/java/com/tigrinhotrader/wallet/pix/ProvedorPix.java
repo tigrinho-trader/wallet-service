@@ -24,6 +24,14 @@ public interface ProvedorPix {
     /** Simula o pagamento (so funciona em modo de desenvolvimento do provedor). */
     void simularPagamento(String idCobranca);
 
+    /**
+     * Cancela no provedor uma cobranca ainda nao paga, para o QR parar de aceitar pagamento.
+     * Devolve true se cancelou. Provedores que expiram sozinhos (AbacatePay) nao precisam.
+     */
+    default boolean cancelar(String idCobranca) {
+        return false;
+    }
+
     record CobrancaPix(String id, long centavos, StatusCobranca status, String brCode, String brCodeBase64,
                        Instant expiraEm, boolean devMode) {
     }

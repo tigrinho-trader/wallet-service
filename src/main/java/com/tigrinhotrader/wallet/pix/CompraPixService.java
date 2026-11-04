@@ -39,7 +39,7 @@ public class CompraPixService {
     @Transactional
     public CompraPix iniciar(String usuarioId, int moedas) {
         if (!habilitado()) {
-            throw new PixIndisponivelException("Compra por Pix desligada (ABACATEPAY_API_KEY nao configurada)");
+            throw new PixIndisponivelException("Compra por Pix desligada (ASAAS_API_KEY nao configurada)");
         }
         if (moedas < propriedades.minimoMoedas() || moedas > propriedades.maximoMoedas()) {
             throw new RegraNegocioException("Quantidade invalida: compre de " + propriedades.minimoMoedas()
@@ -54,7 +54,7 @@ public class CompraPixService {
         ProvedorPix.CobrancaPix cobranca = provedor.criar(id.toString(), centavos,
                 "Flecha Certeira: " + moedas + " moedas", propriedades.expiraEmSegundos());
         if (cobranca.id() == null || cobranca.id().isBlank()) {
-            throw new PixIndisponivelException("AbacatePay nao devolveu o id da cobranca");
+            throw new PixIndisponivelException("Provedor Pix nao devolveu o id da cobranca");
         }
         return compras.save(new CompraPix(id, usuarioId, moedas, cobranca, relogio.instant()));
     }
@@ -64,12 +64,27 @@ public class CompraPixService {
     public CompraPix consultar(String usuarioId, UUID id) {
         CompraPix compra = buscar(usuarioId, id);
         if (compra.pendente()) {
-            aplicar(compra, provedor.consultar(compra.getCobrancaId()));
+            ProvedorPix.StatusCobranca status = provedor.consultar(compra.getCobrancaId());
+            // Passou da validade e ninguem pagou: cancela no provedor para o QR nao aceitar mais
+            // pagamento (o Asaas mantem o QR valido por mais tempo que a loja).
+            if (status == ProvedorPix.StatusCobranca.PENDENTE && venceu(compra)
+                    && provedor.cancelar(compra.getCobrancaId())) {
+                status = ProvedorPix.StatusCobranca.EXPIRADA;
+            }
+            aplicar(compra, status);
         }
         return compra;
     }
 
-    /** Paga a cobranca de mentira. So existe em modo de desenvolvimento do provedor (chave abc_dev_). */
+    /** Folga depois da validade para nao cancelar um Pix que acabou de ser enviado. */
+    private static final java.time.Duration FOLGA_EXPIRACAO = java.time.Duration.ofMinutes(2);
+
+    private boolean venceu(CompraPix compra) {
+        return compra.getExpiraEm() != null
+                && relogio.instant().isAfter(compra.getExpiraEm().plus(FOLGA_EXPIRACAO));
+    }
+
+    /** Paga a cobranca de mentira. So existe no modo de testes do provedor (sandbox do Asaas). */
     @Transactional
     public CompraPix simularPagamento(String usuarioId, UUID id) {
         CompraPix compra = buscar(usuarioId, id);

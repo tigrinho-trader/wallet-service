@@ -47,6 +47,12 @@ wallet:
     url: ${ABACATEPAY_URL:https://api.abacatepay.com/v2}
     centavos-por-moeda: ${PIX_CENTAVOS_POR_MOEDA:100}
     expira-em-segundos: 1800
+    # Asaas: com chave, substitui o AbacatePay. Sandbox: ASAAS_URL=https://api-sandbox.asaas.com/v3
+    asaas:
+      chave-api: ${ASAAS_API_KEY:}
+      url: ${ASAAS_URL:https://api.asaas.com/v3}
+      cliente-id: ${ASAAS_CLIENTE_ID:}
+      cliente-cpf-cnpj: ${ASAAS_CLIENTE_CPF_CNPJ:}
 
 management:
   endpoints:

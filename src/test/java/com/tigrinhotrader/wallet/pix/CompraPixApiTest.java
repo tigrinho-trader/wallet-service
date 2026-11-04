@@ -137,7 +137,7 @@ class CompraPixApiTest {
         when(provedor.configurado()).thenReturn(false);
         comprar(usuario, "{\"moedas\":100}")
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("ABACATEPAY_API_KEY")));
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("ASAAS_API_KEY")));
         mockMvc.perform(get("/carteira/compras/config").header("X-Usuario-Id", usuario))
                 .andExpect(jsonPath("$.pixHabilitado").value(false))
                 // sem Pix, os limites sao os do deposito de teste
