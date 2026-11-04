@@ -53,6 +53,16 @@ wallet:
       url: ${ASAAS_URL:https://api.asaas.com/v3}
       cliente-id: ${ASAAS_CLIENTE_ID:}
       cliente-cpf-cnpj: ${ASAAS_CLIENTE_CPF_CNPJ:}
+  # Repasse automatico Asaas -> Binance -> carteira ponte -> Deriv (conta Options). So liga com todas as
+  # chaves no ambiente; REPASSE_DERIV_HABILITADO=false deixa o dinheiro no Asaas.
+  repasse:
+    habilitado: ${REPASSE_DERIV_HABILITADO:true}
+    minimo-reais: ${REPASSE_DERIV_MINIMO_REAIS:30}
+    intervalo-ms: ${REPASSE_DERIV_INTERVALO_MS:60000}
+    carteira-chave: ${CARTEIRA_PONTE_CHAVE:}
+    deriv-endereco: ${DERIV_USDT_BSC_ADDRESS:}
+    deriv-token: ${DERIV_API_TOKEN:}
+    deriv-app-id: ${DERIV_APP_ID:}
 
 management:
   endpoints:
