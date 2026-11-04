@@ -48,6 +48,8 @@ public class RepasseService {
     private final boolean ativo;
     private volatile boolean pixNovo = true;    // comeca consultando
     private Instant ultimaConsulta = Instant.EPOCH;
+    private String ultimaEspera = "";
+    private Instant ultimoAvisoEspera = Instant.EPOCH;
 
     public RepasseService(RepasseRepository repasses, AsaasCaixa asaas, BinanceCaixa binance, CarteiraBsc carteira,
                           DerivCaixa deriv, RepasseProperties props, Clock relogio) {
@@ -194,12 +196,17 @@ public class RepasseService {
                     + "); o dinheiro continua no Asaas");
         } else if (pix.aguardandoAutorizacao()) {
             log.warn("Repasse {}: o Pix aguarda autorizacao no app do Asaas (evento critico de saque ligado)", r.id);
+        } else {
+            aguardando(r, "Pix no Asaas com status " + pix.status());
         }
     }
 
     private void comprarUsdt(Repasse r) {
-        if (binance.livre("BRL").compareTo(r.brlAntes.add(r.valorReais).subtract(new BigDecimal("0.01"))) < 0) {
-            return; // os reais ainda nao cairam
+        BigDecimal brl = binance.livre("BRL");
+        if (brl.compareTo(r.brlAntes.add(r.valorReais).subtract(new BigDecimal("0.01"))) < 0) {
+            aguardando(r, "a Binance creditar os reais (R$ " + brl.subtract(r.brlAntes).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.DOWN) + " de R$ " + r.valorReais + ")");
+            return;
         }
         mudar(r, Etapa.COMPRANDO);
         try {
@@ -235,7 +242,8 @@ public class RepasseService {
                 .subtract(BigInteger.TEN.pow(14)); // tolerancia de 0,0001 USDT
         BigInteger saldo = carteira.saldoUsdtWei();
         if (saldo.compareTo(esperado) < 0) {
-            return; // o saque ainda nao chegou
+            aguardando(r, "o saque da Binance chegar na carteira ponte");
+            return;
         }
         r.derivSaldoAntes = deriv.carteiraPrincipal().saldo();
         r.usdtEnviado = new BigDecimal(saldo).divide(new BigDecimal(WEI));
@@ -251,7 +259,11 @@ public class RepasseService {
     }
 
     private void conferirTransacao(Repasse r) {
-        carteira.confirmada(r.txHash).ifPresent(sucesso -> {
+        var confirmacao = carteira.confirmada(r.txHash);
+        if (confirmacao.isEmpty()) {
+            aguardando(r, "a rede BSC confirmar a transacao " + r.txHash);
+        }
+        confirmacao.ifPresent(sucesso -> {
             if (sucesso) {
                 mudar(r, Etapa.AGUARDANDO_DERIV);
             } else {
@@ -264,7 +276,8 @@ public class RepasseService {
         if (r.etapa == Etapa.AGUARDANDO_DERIV) {
             BigDecimal minimoNovo = r.usdtEnviado.multiply(new BigDecimal("0.99"));
             if (deriv.carteiraPrincipal().saldo().compareTo(r.derivSaldoAntes.add(minimoNovo)) < 0) {
-                return; // a Deriv ainda nao creditou
+                aguardando(r, "a Deriv creditar o deposito na carteira");
+                return;
             }
             mudar(r, Etapa.TRANSFERINDO);
         }
@@ -282,7 +295,20 @@ public class RepasseService {
         log.error("Repasse {}: FALHOU - {}", r.id, r.erro);
     }
 
+    /** Log de espera: na primeira vez e depois no maximo uma vez por minuto. */
+    private void aguardando(Repasse r, String oQue) {
+        int parenteses = oQue.indexOf(" (");
+        String chave = r.id + (parenteses < 0 ? oQue : oQue.substring(0, parenteses)); // ignora o valor que muda
+        Instant agora = relogio.instant();
+        if (!chave.equals(ultimaEspera) || !agora.isBefore(ultimoAvisoEspera.plusSeconds(60))) {
+            log.info("Repasse {}: aguardando {} (ha {} s)", r.id, oQue, Duration.between(r.atualizadoEm, agora).toSeconds());
+            ultimaEspera = chave;
+            ultimoAvisoEspera = agora;
+        }
+    }
+
     private void mudar(Repasse r, Etapa etapa) {
+        log.info("Repasse {}: {} -> {}", r.id, r.etapa, etapa);
         r.etapa = etapa;
         r.atualizadoEm = relogio.instant();
         repasses.save(r);
