@@ -30,8 +30,9 @@ public class RepasseConfig {
     @Bean
     BinanceCaixa binanceCaixa(RestClient.Builder builder,
                               @Value("${wallet.binance.url:https://api.binance.com}") String url,
-                              @Value("${BINANCE_API_KEY:}") String key,
-                              @Value("${BINANCE_API_SECRET:}") String secret) {
+                              // chave propria do repasse (deposito BRL, compra e saque); sem ela usa a geral
+                              @Value("${REPASSE_BINANCE_API_KEY:${BINANCE_API_KEY:}}") String key,
+                              @Value("${REPASSE_BINANCE_API_SECRET:${BINANCE_API_SECRET:}}") String secret) {
         return new BinanceCaixa(builder.clone().requestFactory(fabrica()), url, key, secret);
     }
 

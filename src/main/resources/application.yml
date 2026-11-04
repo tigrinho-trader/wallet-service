@@ -61,8 +61,9 @@ wallet:
     intervalo-ms: ${REPASSE_DERIV_INTERVALO_MS:60000}
     carteira-chave: ${CARTEIRA_PONTE_CHAVE:}
     deriv-endereco: ${DERIV_USDT_BSC_ADDRESS:}
-    deriv-token: ${DERIV_API_TOKEN:}
-    deriv-app-id: ${DERIV_APP_ID:}
+    # token proprio do repasse (precisa da permissao "payment"); sem ele usa o das flechas
+    deriv-token: ${REPASSE_DERIV_TOKEN:${DERIV_API_TOKEN:}}
+    deriv-app-id: ${REPASSE_DERIV_APP_ID:${DERIV_APP_ID:}}
 
 management:
   endpoints:

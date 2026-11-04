@@ -57,10 +57,10 @@ public class RepasseService {
         List<String> faltando = new ArrayList<>();
         if (!props.habilitado()) faltando.add("REPASSE_DERIV_HABILITADO=false");
         if (!asaas.configurado()) faltando.add("ASAAS_API_KEY (producao)");
-        if (!binance.configurado()) faltando.add("BINANCE_API_KEY/SECRET");
+        if (!binance.configurado()) faltando.add("REPASSE_BINANCE_API_KEY/SECRET");
         if (!carteira.configurada()) faltando.add("CARTEIRA_PONTE_CHAVE");
         if (!props.derivEndereco().startsWith("0x") || props.derivEndereco().length() != 42) faltando.add("DERIV_USDT_BSC_ADDRESS");
-        if (!deriv.configurada()) faltando.add("DERIV_API_TOKEN/DERIV_APP_ID");
+        if (!deriv.configurada()) faltando.add("REPASSE_DERIV_TOKEN/REPASSE_DERIV_APP_ID");
         this.ativo = faltando.isEmpty();
         if (ativo) {
             log.info("Repasse Asaas -> Deriv LIGADO (carteira ponte {}, minimo R$ {})", carteira.endereco(), props.minimoReais());
