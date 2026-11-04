@@ -30,10 +30,13 @@ public class RepasseConfig {
     @Bean
     BinanceCaixa binanceCaixa(RestClient.Builder builder,
                               @Value("${wallet.binance.url:https://api.binance.com}") String url,
-                              // chave propria do repasse (deposito BRL, compra e saque); sem ela usa a geral
-                              @Value("${REPASSE_BINANCE_API_KEY:${BINANCE_API_KEY:}}") String key,
-                              @Value("${REPASSE_BINANCE_API_SECRET:${BINANCE_API_SECRET:}}") String secret) {
-        return new BinanceCaixa(builder.clone().requestFactory(fabrica()), url, key, secret);
+                              @Value("${REPASSE_BINANCE_API_KEY:}") String keyRepasse,
+                              @Value("${REPASSE_BINANCE_API_SECRET:}") String secretRepasse,
+                              @Value("${BINANCE_API_KEY:}") String keyGeral,
+                              @Value("${BINANCE_API_SECRET:}") String secretGeral) {
+        // chave propria do repasse; vazia ou ausente = usa a geral (o compose passa as ausentes como vazias)
+        return new BinanceCaixa(builder.clone().requestFactory(fabrica()), url,
+                preenchido(keyRepasse, keyGeral), preenchido(secretRepasse, secretGeral));
     }
 
     @Bean
@@ -42,7 +45,15 @@ public class RepasseConfig {
     }
 
     @Bean
-    DerivCaixa derivCaixa(RestClient.Builder builder, RepasseProperties props) {
-        return new DerivCaixa(builder.clone().requestFactory(fabrica()), props.derivUrl(), props.derivToken(), props.derivAppId());
+    DerivCaixa derivCaixa(RestClient.Builder builder, RepasseProperties props,
+                          @Value("${DERIV_API_TOKEN:}") String tokenGeral,
+                          @Value("${DERIV_APP_ID:}") String appIdGeral) {
+        return new DerivCaixa(builder.clone().requestFactory(fabrica()), props.derivUrl(),
+                preenchido(props.derivToken(), tokenGeral), preenchido(props.derivAppId(), appIdGeral));
+    }
+
+    /** O primeiro valor nao vazio (variavel vazia conta como ausente). */
+    static String preenchido(String preferido, String reserva) {
+        return preferido != null && !preferido.isBlank() ? preferido.trim() : (reserva == null ? "" : reserva.trim());
     }
 }

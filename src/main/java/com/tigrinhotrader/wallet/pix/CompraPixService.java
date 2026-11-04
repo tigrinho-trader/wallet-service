@@ -1,5 +1,6 @@
 package com.tigrinhotrader.wallet.pix;
 
+import com.tigrinhotrader.wallet.repasse.RepasseService;
 import com.tigrinhotrader.wallet.servico.CarteiraService;
 import com.tigrinhotrader.wallet.servico.RegraNegocioException;
 import java.math.BigDecimal;
@@ -21,14 +22,16 @@ public class CompraPixService {
     private final CarteiraService carteiras;
     private final PixProperties propriedades;
     private final Clock relogio;
+    private final RepasseService repasse;
 
     public CompraPixService(CompraPixRepository compras, ProvedorPix provedor, CarteiraService carteiras,
-                            PixProperties propriedades, Clock relogio) {
+                            PixProperties propriedades, Clock relogio, RepasseService repasse) {
         this.compras = compras;
         this.provedor = provedor;
         this.carteiras = carteiras;
         this.propriedades = propriedades;
         this.relogio = relogio;
+        this.repasse = repasse;
     }
 
     public boolean habilitado() {
@@ -104,6 +107,7 @@ public class CompraPixService {
         if (compra.atualizarStatus(status, agora)) {
             carteiras.creditarCompra(compra.getUsuarioId(), BigDecimal.valueOf(compra.getMoedas()),
                     compra.getCobrancaId(), "Compra Pix: " + compra.getMoedas() + " moedas");
+            repasse.pixRecebido(); // o dinheiro ja esta no Asaas: o repasse para a Deriv comeca em ate 15 s
         }
         compras.save(compra);
     }

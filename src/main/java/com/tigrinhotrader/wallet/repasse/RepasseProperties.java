@@ -9,17 +9,18 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * Repasse automatico Asaas -> Binance -> carteira ponte -> Deriv ({@code wallet.repasse.*}).
  *
  * @param habilitado     REPASSE_DERIV_HABILITADO; false deixa o dinheiro no Asaas
- * @param minimoReais    so inicia um repasse com pelo menos este saldo no Asaas
+ * @param minimoReais    piso extra opcional; o minimo real e o saque minimo de USDT da Binance (calculado na hora)
  * @param carteiraChave  CARTEIRA_PONTE_CHAVE: chave privada da carteira ponte (BSC). Nunca no repositorio.
  * @param derivEndereco  DERIV_USDT_BSC_ADDRESS: endereco de deposito USDT (BEP20) da Deriv
  * @param derivToken     DERIV_API_TOKEN: precisa da permissao "payment" (carteira e transferencias)
  * @param prazoMaximo    um repasse parado ha mais tempo que isso e marcado como falho
  * @param esperaAposFalha depois de uma falha, espera isso antes de iniciar outro repasse
+ * @param consultaOciosa sem repasse em andamento e sem Pix novo, consulta o saldo do Asaas a cada este tempo
  */
 @ConfigurationProperties("wallet.repasse")
 public record RepasseProperties(
         @DefaultValue("true") boolean habilitado,
-        @DefaultValue("30") BigDecimal minimoReais,
+        @DefaultValue("0") BigDecimal minimoReais,
         @DefaultValue("") String carteiraChave,
         @DefaultValue("") String derivEndereco,
         @DefaultValue("https://bsc-dataseed.bnbchain.org") String bscRpc,
@@ -27,5 +28,6 @@ public record RepasseProperties(
         @DefaultValue("") String derivToken,
         @DefaultValue("") String derivAppId,
         @DefaultValue("3h") Duration prazoMaximo,
-        @DefaultValue("6h") Duration esperaAposFalha) {
+        @DefaultValue("6h") Duration esperaAposFalha,
+        @DefaultValue("5m") Duration consultaOciosa) {
 }

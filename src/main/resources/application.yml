@@ -57,13 +57,15 @@ wallet:
   # chaves no ambiente; REPASSE_DERIV_HABILITADO=false deixa o dinheiro no Asaas.
   repasse:
     habilitado: ${REPASSE_DERIV_HABILITADO:true}
-    minimo-reais: ${REPASSE_DERIV_MINIMO_REAIS:30}
-    intervalo-ms: ${REPASSE_DERIV_INTERVALO_MS:60000}
+    # 0 = so o saque minimo de USDT da Binance (5 USDT, calculado na hora pela cotacao)
+    minimo-reais: ${REPASSE_DERIV_MINIMO_REAIS:0}
+    # com repasse em andamento confere a cada 15 s; um Pix confirmado dispara o repasse na hora
+    intervalo-ms: ${REPASSE_DERIV_INTERVALO_MS:15000}
     carteira-chave: ${CARTEIRA_PONTE_CHAVE:}
     deriv-endereco: ${DERIV_USDT_BSC_ADDRESS:}
-    # token proprio do repasse (precisa da permissao "payment"); sem ele usa o das flechas
-    deriv-token: ${REPASSE_DERIV_TOKEN:${DERIV_API_TOKEN:}}
-    deriv-app-id: ${REPASSE_DERIV_APP_ID:${DERIV_APP_ID:}}
+    # token proprio do repasse (precisa da permissao "payment"); vazio = usa DERIV_API_TOKEN/DERIV_APP_ID
+    deriv-token: ${REPASSE_DERIV_TOKEN:}
+    deriv-app-id: ${REPASSE_DERIV_APP_ID:}
 
 management:
   endpoints:

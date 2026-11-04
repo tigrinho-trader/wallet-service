@@ -71,8 +71,8 @@ class RepasseServiceTest {
     }
 
     private RepasseService servico(boolean habilitado, String derivEndereco) {
-        RepasseProperties props = new RepasseProperties(habilitado, new BigDecimal("30"), "chave", derivEndereco,
-                "rpc", "deriv", "token", "app", Duration.ofHours(3), Duration.ofHours(6));
+        RepasseProperties props = new RepasseProperties(habilitado, BigDecimal.ZERO, "chave", derivEndereco,
+                "rpc", "deriv", "token", "app", Duration.ofHours(3), Duration.ofHours(6), Duration.ofMinutes(5));
         Clock relogio = new Clock() {
             public ZoneOffset getZone() { return ZoneOffset.UTC; }
             public Clock withZone(java.time.ZoneId z) { return this; }
@@ -213,5 +213,41 @@ class RepasseServiceTest {
         verify(binance, never()).pedirDepositoPix(any());
         verify(deriv, never()).carteiraPrincipal();
         verifyNoInteractions(repasses);
+    }
+
+    @Test
+    void ociosoSoConsultaOAsaasDeTemposEmTemposOuQuandoChegaPix() {
+        when(asaas.saldo()).thenReturn(BigDecimal.ZERO);
+        RepasseService servico = servico(true, DERIV);
+
+        servico.ciclo();                 // primeira consulta
+        servico.ciclo();                 // logo depois: nao consulta de novo
+        verify(asaas, times(1)).saldo();
+
+        servico.pixRecebido();           // Pix confirmado: consulta ja no proximo ciclo
+        servico.ciclo();
+        verify(asaas, times(2)).saldo();
+
+        agora = agora.plus(Duration.ofMinutes(6)); // passou o intervalo ocioso
+        servico.ciclo();
+        verify(asaas, times(3)).saldo();
+    }
+
+    @Test
+    void saldoAbaixoDoSaqueMinimoDaBinanceFicaJuntando() {
+        when(asaas.saldo()).thenReturn(new BigDecimal("27.50")); // 27,50 / 5,47 = 5,03 USDT < 5 x 1,02
+
+        servico(true, DERIV).ciclo();
+
+        assertThat(banco).isEmpty();
+        verify(binance, never()).pedirDepositoPix(any());
+    }
+
+    @Test
+    void variavelDoRepasseVaziaUsaAChaveGeral() {
+        assertThat(RepasseConfig.preenchido("", "geral")).isEqualTo("geral");
+        assertThat(RepasseConfig.preenchido("  ", "geral")).isEqualTo("geral");
+        assertThat(RepasseConfig.preenchido(null, "geral")).isEqualTo("geral");
+        assertThat(RepasseConfig.preenchido("propria", "geral")).isEqualTo("propria");
     }
 }

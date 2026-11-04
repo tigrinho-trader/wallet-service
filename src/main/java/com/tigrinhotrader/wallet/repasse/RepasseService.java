@@ -35,6 +35,8 @@ public class RepasseService {
     private static final Logger log = LoggerFactory.getLogger(RepasseService.class);
     private static final EnumSet<Etapa> FINALIZADAS = EnumSet.of(Etapa.CONCLUIDO, Etapa.FALHOU);
     private static final BigInteger WEI = BigInteger.TEN.pow(18);
+    /** Folga sobre o saque minimo da Binance, para a cotacao mudar entre a conferencia e a compra. */
+    private static final BigDecimal FOLGA_MINIMO = new BigDecimal("1.02");
 
     private final RepasseRepository repasses;
     private final AsaasCaixa asaas;
@@ -44,6 +46,8 @@ public class RepasseService {
     private final RepasseProperties props;
     private final Clock relogio;
     private final boolean ativo;
+    private volatile boolean pixNovo = true;    // comeca consultando
+    private Instant ultimaConsulta = Instant.EPOCH;
 
     public RepasseService(RepasseRepository repasses, AsaasCaixa asaas, BinanceCaixa binance, CarteiraBsc carteira,
                           DerivCaixa deriv, RepasseProperties props, Clock relogio) {
@@ -63,7 +67,8 @@ public class RepasseService {
         if (!deriv.configurada()) faltando.add("REPASSE_DERIV_TOKEN/REPASSE_DERIV_APP_ID");
         this.ativo = faltando.isEmpty();
         if (ativo) {
-            log.info("Repasse Asaas -> Deriv LIGADO (carteira ponte {}, minimo R$ {})", carteira.endereco(), props.minimoReais());
+            log.info("Repasse Asaas -> Deriv LIGADO (carteira ponte {}; minimo: saque minimo da Binance{})", carteira.endereco(),
+                    props.minimoReais().signum() > 0 ? " ou R$ " + props.minimoReais() : "");
         } else {
             log.info("Repasse Asaas -> Deriv desligado: {}", String.join(", ", faltando));
         }
@@ -73,9 +78,14 @@ public class RepasseService {
         return ativo;
     }
 
+    /** Um Pix de compra foi confirmado: o proximo ciclo (em ate 15 s) ja confere o saldo e inicia o repasse. */
+    public void pixRecebido() {
+        pixNovo = true;
+    }
+
     @Scheduled(fixedDelayString = "${wallet.repasse.intervalo-ms:60000}",
                initialDelayString = "${wallet.repasse.atraso-inicial-ms:60000}")
-    public void ciclo() {
+    public synchronized void ciclo() { // synchronized: nunca dois ciclos ao mesmo tempo
         if (!ativo) {
             return;
         }
@@ -83,7 +93,9 @@ public class RepasseService {
             var emAndamento = repasses.findFirstByEtapaNotInOrderByCriadoEmAsc(FINALIZADAS);
             if (emAndamento.isPresent()) {
                 avancar(emAndamento.get());
-            } else {
+            } else if (pixNovo || !relogio.instant().isBefore(ultimaConsulta.plus(props.consultaOciosa()))) {
+                pixNovo = false;
+                ultimaConsulta = relogio.instant();
                 iniciarSeHouverSaldo();
             }
         } catch (Exception e) {
@@ -99,12 +111,14 @@ public class RepasseService {
             return; // da tempo de conferir a falha antes de mover mais dinheiro
         }
         BigDecimal saldo = asaas.saldo().setScale(2, RoundingMode.DOWN);
-        if (saldo.compareTo(props.minimoReais()) < 0) {
+        if (saldo.signum() <= 0 || saldo.compareTo(props.minimoReais()) < 0) {
             return;
         }
         BinanceCaixa.Rede rede = binance.redeBsc("USDT");
         BigDecimal usdtEstimado = saldo.divide(binance.preco("USDTBRL"), 8, RoundingMode.DOWN);
-        if (usdtEstimado.compareTo(rede.minimo()) < 0) {
+        if (usdtEstimado.compareTo(rede.minimo().multiply(FOLGA_MINIMO)) < 0) {
+            log.info("Repasse Deriv: R$ {} no Asaas (~{} USDT) ainda abaixo do saque minimo da Binance ({} USDT); juntando",
+                    saldo, usdtEstimado.setScale(2, RoundingMode.DOWN), rede.minimo());
             return;
         }
         if (!carteira.gasSuficiente()) {
