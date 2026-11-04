@@ -45,10 +45,6 @@ public class CompraPixService {
             throw new RegraNegocioException("Quantidade invalida: compre de " + propriedades.minimoMoedas()
                     + " a " + propriedades.maximoMoedas() + " moedas");
         }
-        if (compras.countByUsuarioIdAndStatus(usuarioId, ProvedorPix.StatusCobranca.PENDENTE) >= propriedades.maxPendentes()) {
-            throw new RegraNegocioException("Voce ja tem " + propriedades.maxPendentes()
-                    + " cobrancas Pix em aberto. Pague ou espere expirar antes de gerar outra.");
-        }
         UUID id = UUID.randomUUID();
         long centavos = (long) moedas * propriedades.centavosPorMoeda();
         ProvedorPix.CobrancaPix cobranca = provedor.criar(id.toString(), centavos,

@@ -163,13 +163,11 @@ class CompraPixApiTest {
     }
 
     @Test
-    void limiteDeCobrancasEmAberto() throws Exception {
+    void semLimiteDeCobrancasEmAberto() throws Exception {
         novaCompra(100);
         novaCompra(100);
         novaCompra(100);
-        comprar(usuario, "{\"moedas\":100}")
-                .andExpect(status().isUnprocessableEntity())
-                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("em aberto")));
+        novaCompra(100);
     }
 
     @Test
