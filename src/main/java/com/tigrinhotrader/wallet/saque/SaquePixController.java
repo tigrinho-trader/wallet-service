@@ -7,8 +7,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -20,15 +18,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Saque por Pix do caixa do Asaas. O gateway apaga os X-Usuario-* do cliente e preenche com os do token,
- * entao id e e-mail aqui sao confiaveis. Quem nao pode sacar recebe {@code permitido: false} no GET e 404 no POST.
+ * Saque por Pix do caixa do Asaas. O gateway apaga os X-Usuario-* do cliente e preenche com os do token, entao o
+ * id aqui e confiavel. Quem nao e ADMIN recebe {@code permitido: false} no GET e 404 no POST.
  */
 @RestController
 @RequestMapping("/carteira/saques-pix")
 public class SaquePixController {
 
     static final String CABECALHO_USUARIO = "X-Usuario-Id";
-    static final String CABECALHO_EMAIL = "X-Usuario-Email";
 
     private final SaqueService servico;
 
@@ -54,28 +51,19 @@ public class SaquePixController {
      * {@code disponivel} = o menor entre as moedas (em reais) e o caixa livre do Asaas: o que da para sacar agora.
      */
     public record ResumoResponse(boolean permitido, BigDecimal disponivel, BigDecimal moedas, BigDecimal caixa,
-                                 BigDecimal restanteHoje, BigDecimal limiteDiario, BigDecimal minimo,
-                                 List<SaqueResponse> saques) {
+                                 BigDecimal minimo, List<SaqueResponse> saques) {
     }
 
     @GetMapping
-    public ResumoResponse resumo(@RequestHeader(CABECALHO_USUARIO) String usuarioId,
-                                 @RequestHeader(value = CABECALHO_EMAIL, required = false) String email) {
-        SaqueService.Resumo r = servico.resumo(usuarioId, decodificar(email));
-        return new ResumoResponse(r.permitido(), r.disponivel(), r.moedas(), r.caixa(), r.restanteHoje(),
-                r.limiteDiario(), r.minimo(), r.recentes().stream().map(SaqueResponse::de).toList());
+    public ResumoResponse resumo(@RequestHeader(CABECALHO_USUARIO) String usuarioId) {
+        SaqueService.Resumo r = servico.resumo(usuarioId);
+        return new ResumoResponse(r.permitido(), r.disponivel(), r.moedas(), r.caixa(), r.minimo(),
+                r.recentes().stream().map(SaqueResponse::de).toList());
     }
 
     @PostMapping
     public SaqueResponse sacar(@RequestHeader(CABECALHO_USUARIO) String usuarioId,
-                               @RequestHeader(value = CABECALHO_EMAIL, required = false) String email,
                                @Valid @RequestBody SaqueRequest pedido) {
-        return SaqueResponse.de(servico.sacar(usuarioId, decodificar(email), pedido.tipoChave(), pedido.chave(),
-                pedido.valor()));
-    }
-
-    /** O gateway manda o e-mail em URL-encoding UTF-8. */
-    private static String decodificar(String email) {
-        return email == null ? null : URLDecoder.decode(email, StandardCharsets.UTF_8);
+        return SaqueResponse.de(servico.sacar(usuarioId, pedido.tipoChave(), pedido.chave(), pedido.valor()));
     }
 }

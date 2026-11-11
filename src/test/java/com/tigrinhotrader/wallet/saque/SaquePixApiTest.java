@@ -28,16 +28,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
- * Saque Pix pela API, com a carteira e o banco de verdade (so o Asaas e falso): so o e-mail de SAQUE_ADMINS ve e
- * usa, e nunca se saca mais moedas do que a carteira tem, mesmo com dinheiro sobrando no Asaas.
+ * Saque Pix pela API, com a carteira e o banco de verdade (so o Asaas e o user-service sao falsos): so conta ADMIN
+ * ve e usa, e nunca se saca mais moedas do que a carteira tem, mesmo com dinheiro sobrando no Asaas.
  */
-@SpringBootTest(properties = {"wallet.saque.admins=dono@exemplo.com", "wallet.saque.limite-diario-reais=500",
-        "wallet.saldo-inicial=0"}) // sem bonus de boas-vindas: cada teste da as moedas que quer
+@SpringBootTest(properties = "wallet.saldo-inicial=0") // sem bonus de boas-vindas: cada teste da as moedas que quer
 @AutoConfigureMockMvc
 class SaquePixApiTest {
 
     private static final AtomicInteger CONTADOR = new AtomicInteger();
-    private static final String EMAIL_DONO = "dono%40exemplo.com"; // o gateway manda em URL-encoding
 
     @Autowired
     private MockMvc mockMvc;
@@ -48,12 +46,15 @@ class SaquePixApiTest {
     private RabbitTemplate rabbitTemplate;
     @MockBean
     private AsaasCaixa asaas;
+    @MockBean
+    private ClienteUsuarios usuarios;
 
     private String usuario;
 
     @BeforeEach
     void preparar() {
         usuario = "auth0|api-" + CONTADOR.incrementAndGet();
+        when(usuarios.admin(usuario)).thenReturn(true);   // o dono e ADMIN; qualquer outro id nao
         when(asaas.configurado()).thenReturn(true);
         when(asaas.saldo()).thenReturn(new BigDecimal("300.00"));
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
@@ -65,7 +66,7 @@ class SaquePixApiTest {
     }
 
     private ResultActions sacar(String corpo) throws Exception {
-        return mockMvc.perform(post("/carteira/saques-pix").header("X-Usuario-Id", usuario).header("X-Usuario-Email", EMAIL_DONO)
+        return mockMvc.perform(post("/carteira/saques-pix").header("X-Usuario-Id", usuario)
                 .contentType(MediaType.APPLICATION_JSON).content(corpo));
     }
 
@@ -74,10 +75,10 @@ class SaquePixApiTest {
     }
 
     @Test
-    void quemNaoEDonoNaoVeOSaque() throws Exception {
+    void quemNaoEAdminNaoVeOSaque() throws Exception {
         moedas("100");
-        mockMvc.perform(get("/carteira/saques-pix").header("X-Usuario-Id", usuario)
-                        .header("X-Usuario-Email", "intruso%40exemplo.com"))
+        when(usuarios.admin(usuario)).thenReturn(false);
+        mockMvc.perform(get("/carteira/saques-pix").header("X-Usuario-Id", usuario))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.permitido").value(false))
                 .andExpect(jsonPath("$.disponivel").doesNotExist());
@@ -94,7 +95,8 @@ class SaquePixApiTest {
     void com155MoedasNaoSaca20MesmoComCaixaNoAsaas() throws Exception {
         moedas("15.50");
 
-        mockMvc.perform(get("/carteira/saques-pix").header("X-Usuario-Id", usuario).header("X-Usuario-Email", EMAIL_DONO))
+        mockMvc.perform(get("/carteira/saques-pix").header("X-Usuario-Id", usuario))
+                .andExpect(jsonPath("$.permitido").value(true))
                 .andExpect(jsonPath("$.moedas").value(15.5))
                 .andExpect(jsonPath("$.caixa").value(300.0))
                 .andExpect(jsonPath("$.disponivel").value(15.5));

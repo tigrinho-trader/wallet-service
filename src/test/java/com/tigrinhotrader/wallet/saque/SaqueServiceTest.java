@@ -51,6 +51,7 @@ class SaqueServiceTest {
     private CarteiraService carteiras;
     private AsaasCaixa asaas;
     private RepasseService repasse;
+    private ClienteUsuarios usuarios;
     private BigDecimal moedas = new BigDecimal("1000.00");   // saldo da carteira na plataforma
     private BigDecimal livre = new BigDecimal("300.00");     // caixa livre no Asaas
     private Instant agora = Instant.parse("2026-11-11T15:00:00Z"); // 12h em Brasilia
@@ -69,8 +70,6 @@ class SaqueServiceTest {
         when(saques.findTop20ByUsuarioIdOrderByCriadoEmDesc(anyString())).thenAnswer(i -> banco.stream()
                 .filter(s -> s.usuarioId.equals(i.getArgument(0)))
                 .sorted(Comparator.comparing((SaquePix s) -> s.criadoEm).reversed()).toList());
-        when(saques.findByUsuarioIdAndCriadoEmGreaterThanEqual(anyString(), any())).thenAnswer(i -> banco.stream()
-                .filter(s -> s.usuarioId.equals(i.getArgument(0)) && !s.criadoEm.isBefore(i.getArgument(1))).toList());
 
         // carteira de verdade em miniatura: debita so com saldo, referencia unica, estorno uma vez so
         carteiras = mock(CarteiraService.class);
@@ -99,6 +98,9 @@ class SaqueServiceTest {
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
                 .thenReturn(new Transferencia("T1", "PENDING", true, BigDecimal.ZERO, "OSCAR R DE S FILHO", null));
 
+        usuarios = mock(ClienteUsuarios.class);
+        when(usuarios.admin(DONO)).thenReturn(true);   // o user-service diz quem e ADMIN
+
         repasse = mock(RepasseService.class);
         when(repasse.caixaLivre()).thenAnswer(i -> livre);
         when(repasse.comCaixaLivre(any())).thenAnswer(i -> {
@@ -107,19 +109,14 @@ class SaqueServiceTest {
         });
     }
 
-    private SaqueService servico(String limiteDiario) {
+    private SaqueService servico() {
         Clock relogio = new Clock() {
             public ZoneOffset getZone() { return ZoneOffset.UTC; }
             public Clock withZone(java.time.ZoneId z) { return this; }
             public Instant instant() { return agora; }
         };
-        return new SaqueService(saques, carteiras, asaas, repasse,
-                new SaqueProperties(" auth0|dono , Dono@Exemplo.com ", new BigDecimal(limiteDiario), BigDecimal.ONE),
-                relogio, mock(PlatformTransactionManager.class), 100);
-    }
-
-    private SaqueService servico() {
-        return servico("1000");
+        return new SaqueService(saques, carteiras, asaas, repasse, usuarios, relogio,
+                mock(PlatformTransactionManager.class), 100);
     }
 
     // ---------------------------------------------------------------- moedas da plataforma
@@ -128,7 +125,7 @@ class SaqueServiceTest {
     void naoSacaMaisDoQueAsMoedasMesmoComDinheiroNoAsaas() {
         moedas = new BigDecimal("15.50");   // o Asaas tem R$ 300 livres, mas a plataforma so 15,5 moedas
 
-        assertThatThrownBy(() -> servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("20.00")))
+        assertThatThrownBy(() -> servico().sacar(DONO, "CPF", CPF, new BigDecimal("20.00")))
                 .isInstanceOf(RegraNegocioException.class)
                 .hasMessageContaining("Saldo insuficiente na plataforma").hasMessageContaining("15.50 moedas");
 
@@ -141,7 +138,7 @@ class SaqueServiceTest {
     void umCentavoAMaisQueAsMoedasTambemERecusado() {
         moedas = new BigDecimal("15.50");
 
-        assertThatThrownBy(() -> servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("15.51")))
+        assertThatThrownBy(() -> servico().sacar(DONO, "CPF", CPF, new BigDecimal("15.51")))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("Saldo insuficiente na plataforma");
         verify(asaas, never()).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
     }
@@ -150,7 +147,7 @@ class SaqueServiceTest {
     void sacaTodasAsMoedasEDebitaAntesDePedirOPix() {
         moedas = new BigDecimal("15.50");
 
-        SaquePix s = servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("15.50"));
+        SaquePix s = servico().sacar(DONO, "CPF", CPF, new BigDecimal("15.50"));
 
         assertThat(s.status).isEqualTo(Status.ENVIADO);
         assertThat(moedas).isEqualByComparingTo("0.00");
@@ -164,9 +161,9 @@ class SaqueServiceTest {
     void doisSaquesSeguidosNaoPassamDasMoedas() {
         moedas = new BigDecimal("30.00");
         SaqueService servico = servico();
-        servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("20.00"));
+        servico.sacar(DONO, "CPF", CPF, new BigDecimal("20.00"));
 
-        assertThatThrownBy(() -> servico.sacar(DONO, null, "EMAIL", "a@b.com", new BigDecimal("20.00")))
+        assertThatThrownBy(() -> servico.sacar(DONO, "EMAIL", "a@b.com", new BigDecimal("20.00")))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("10.00 moedas");
         verify(asaas, times(1)).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
     }
@@ -178,7 +175,7 @@ class SaqueServiceTest {
                 .when(carteiras).debitarSaquePix(anyString(), any(), anyString(), anyString());
         moedas = new BigDecimal("50.00");
 
-        assertThatThrownBy(() -> servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("40.00")))
+        assertThatThrownBy(() -> servico().sacar(DONO, "CPF", CPF, new BigDecimal("40.00")))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("Saldo insuficiente na plataforma");
         assertThat(banco).isEmpty();
         verify(asaas, never()).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
@@ -190,7 +187,7 @@ class SaqueServiceTest {
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
                 .thenThrow(new RepasseException("Asaas respondeu 400: Saldo insuficiente"));
 
-        SaquePix s = servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("40.00"));
+        SaquePix s = servico().sacar(DONO, "CPF", CPF, new BigDecimal("40.00"));
 
         assertThat(s.status).isEqualTo(Status.FALHOU);
         assertThat(s.motivo).contains("recusou").contains("Saldo insuficiente");
@@ -199,31 +196,28 @@ class SaqueServiceTest {
     }
 
     @Test
-    void semRespostaDoAsaasNaoDevolveAsMoedasEContaNoLimite() {
+    void semRespostaDoAsaasNaoDevolveAsMoedas() {
         moedas = new BigDecimal("100.00");
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
                 .thenThrow(new ResourceAccessException("timeout"));
-        SaqueService servico = servico("100");
-
-        SaquePix s = servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("90.00"));
+        SaquePix s = servico().sacar(DONO, "CPF", CPF, new BigDecimal("90.00"));
 
         assertThat(s.status).isEqualTo(Status.CONFERIR);
         assertThat(s.motivo).contains("confira");
         assertThat(moedas).isEqualByComparingTo("10.00");    // pode ter saido: as moedas continuam debitadas
-        assertThat(servico.resumo(DONO, null).restanteHoje()).isEqualByComparingTo("10.00");
     }
 
     @Test
     void falhaDescobertaDepoisDevolveAsMoedasUmaVezSo() {
         moedas = new BigDecimal("100.00");
         SaqueService servico = servico();
-        SaquePix s = servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("40.00"));
+        SaquePix s = servico.sacar(DONO, "CPF", CPF, new BigDecimal("40.00"));
         assertThat(moedas).isEqualByComparingTo("60.00");
         when(asaas.consultarTransferencia("T1"))
                 .thenReturn(new Transferencia("T1", "FAILED", true, null, null, "Chave nao encontrada"));
 
-        servico.resumo(DONO, null);
-        servico.resumo(DONO, null);
+        servico.resumo(DONO);
+        servico.resumo(DONO);
 
         assertThat(s.status).isEqualTo(Status.FALHOU);
         assertThat(moedas).isEqualByComparingTo("100.00");
@@ -233,23 +227,22 @@ class SaqueServiceTest {
     @Test
     void disponivelEOMenorEntreMoedasECaixa() {
         moedas = new BigDecimal("15.50");
-        assertThat(servico().resumo(DONO, null).disponivel()).isEqualByComparingTo("15.50");
+        assertThat(servico().resumo(DONO).disponivel()).isEqualByComparingTo("15.50");
 
         moedas = new BigDecimal("900.00");
-        assertThat(servico().resumo(DONO, null).disponivel()).isEqualByComparingTo("300.00");
+        assertThat(servico().resumo(DONO).disponivel()).isEqualByComparingTo("300.00");
     }
 
     // ---------------------------------------------------------------- caixa do Asaas, limite e permissao
 
     @Test
-    void soQuemEstaNaListaPodeSacar() {
+    void soContaAdminPodeSacar() {
         SaqueService servico = servico();
 
-        assertThat(servico.permitido(DONO, null)).isTrue();
-        assertThat(servico.permitido("google|outro", "dono@exemplo.com")).isTrue(); // pelo e-mail, sem diferenciar maiusculas
-        assertThat(servico.permitido("google|outro", "intruso@exemplo.com")).isFalse();
-        assertThat(servico.resumo("google|outro", null).permitido()).isFalse();
-        assertThatThrownBy(() -> servico.sacar("google|outro", null, "CPF", CPF, BigDecimal.TEN))
+        assertThat(servico.permitido(DONO)).isTrue();
+        assertThat(servico.permitido("google|outro")).isFalse(); // o user-service disse que nao e ADMIN
+        assertThat(servico.resumo("google|outro").permitido()).isFalse();
+        assertThatThrownBy(() -> servico.sacar("google|outro", "CPF", CPF, BigDecimal.TEN))
                 .isInstanceOf(SaqueNaoPermitidoException.class);
         verify(carteiras, never()).debitarSaquePix(anyString(), any(), anyString(), anyString());
         verify(asaas, never()).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
@@ -258,12 +251,12 @@ class SaqueServiceTest {
     @Test
     void semAsaasDeProducaoNinguemSaca() {
         when(asaas.configurado()).thenReturn(false);
-        assertThat(servico().permitido(DONO, null)).isFalse();
+        assertThat(servico().permitido(DONO)).isFalse();
     }
 
     @Test
     void sacaPeloAsaasComAChaveNormalizadaEGravaAntesDePedir() {
-        SaquePix s = servico().sacar(DONO, null, "cpf", CPF, new BigDecimal("100"));
+        SaquePix s = servico().sacar(DONO, "cpf", CPF, new BigDecimal("100"));
 
         verify(asaas).transferirPix(eq("52998224725"), eq("CPF"), eq(new BigDecimal("100.00")),
                 eq(SaqueService.DESCRICAO), eq(s.id.toString()));
@@ -276,7 +269,7 @@ class SaqueServiceTest {
     void naoSacaMaisQueOCaixaLivreDoAsaas() {
         livre = new BigDecimal("50.00");
 
-        assertThatThrownBy(() -> servico().sacar(DONO, null, "CPF", CPF, new BigDecimal("60.00")))
+        assertThatThrownBy(() -> servico().sacar(DONO, "CPF", CPF, new BigDecimal("60.00")))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("caixa do Asaas").hasMessageContaining("50.00");
         assertThat(banco).isEmpty();
         assertThat(moedas).isEqualByComparingTo("1000.00");
@@ -284,36 +277,15 @@ class SaqueServiceTest {
     }
 
     @Test
-    void respeitaOLimiteDiarioEFalhaNaoConta() {
-        SaqueService servico = servico("100");
-        servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("80.00"));
-
-        assertThatThrownBy(() -> servico.sacar(DONO, null, "EMAIL", "a@b.com", new BigDecimal("30.00")))
-                .isInstanceOf(RegraNegocioException.class).hasMessageContaining("restam R$ 20.00");
-
-        banco.get(0).status = Status.FALHOU; // o de 80 nao saiu: libera o limite
-        assertThat(servico.sacar(DONO, null, "EMAIL", "a@b.com", new BigDecimal("30.00")).status).isEqualTo(Status.ENVIADO);
-    }
-
-    @Test
-    void limiteDiarioVoltaNoDiaSeguinteDeBrasilia() {
-        SaqueService servico = servico("100");
-        servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("100.00"));
-
-        agora = Instant.parse("2026-11-12T03:30:00Z"); // 00h30 do dia 12 em Brasilia
-        assertThat(servico.resumo(DONO, null).restanteHoje()).isEqualByComparingTo("100.00");
-    }
-
-    @Test
     void cliqueRepetidoNaoPagaDuasVezes() {
         SaqueService servico = servico();
-        servico.sacar(DONO, null, "CPF", CPF, BigDecimal.TEN);
+        servico.sacar(DONO, "CPF", CPF, BigDecimal.TEN);
 
-        assertThatThrownBy(() -> servico.sacar(DONO, null, "CPF", CPF, BigDecimal.TEN))
+        assertThatThrownBy(() -> servico.sacar(DONO, "CPF", CPF, BigDecimal.TEN))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("acabou de ser feito");
 
         agora = agora.plus(Duration.ofMinutes(3));
-        assertThat(servico.sacar(DONO, null, "CPF", CPF, BigDecimal.TEN).status).isEqualTo(Status.ENVIADO);
+        assertThat(servico.sacar(DONO, "CPF", CPF, BigDecimal.TEN).status).isEqualTo(Status.ENVIADO);
     }
 
     @Test
@@ -321,32 +293,31 @@ class SaqueServiceTest {
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
                 .thenReturn(new Transferencia("T2", "PENDING", false, null, null, null));
 
-        assertThat(servico().sacar(DONO, null, "CPF", CPF, BigDecimal.TEN).status).isEqualTo(Status.AGUARDANDO_AUTORIZACAO);
+        assertThat(servico().sacar(DONO, "CPF", CPF, BigDecimal.TEN).status).isEqualTo(Status.AGUARDANDO_AUTORIZACAO);
     }
 
     @Test
     void resumoAtualizaOsSaquesEmAberto() {
         SaqueService servico = servico();
-        SaquePix s = servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("40.00"));
+        SaquePix s = servico.sacar(DONO, "CPF", CPF, new BigDecimal("40.00"));
         when(asaas.consultarTransferencia("T1"))
                 .thenReturn(new Transferencia("T1", "DONE", true, new BigDecimal("0.00"), "OSCAR R DE S FILHO", null));
 
-        SaqueService.Resumo r = servico.resumo(DONO, null);
+        SaqueService.Resumo r = servico.resumo(DONO);
 
         assertThat(r.permitido()).isTrue();
         assertThat(s.status).isEqualTo(Status.CONCLUIDO);
         assertThat(r.moedas()).isEqualByComparingTo("960.00");
         assertThat(r.caixa()).isEqualByComparingTo("300.00");
-        assertThat(r.restanteHoje()).isEqualByComparingTo("960.00");
         assertThat(r.recentes()).extracting(x -> x.id).containsExactly(s.id);
     }
 
     @Test
     void valorComMaisDeDuasCasasOuAbaixoDoMinimoERecusado() {
         SaqueService servico = servico();
-        assertThatThrownBy(() -> servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("10.005")))
+        assertThatThrownBy(() -> servico.sacar(DONO, "CPF", CPF, new BigDecimal("10.005")))
                 .isInstanceOf(RegraNegocioException.class);
-        assertThatThrownBy(() -> servico.sacar(DONO, null, "CPF", CPF, new BigDecimal("0.50")))
+        assertThatThrownBy(() -> servico.sacar(DONO, "CPF", CPF, new BigDecimal("0.50")))
                 .isInstanceOf(RegraNegocioException.class).hasMessageContaining("minimo");
         assertThat(banco).isEmpty();
     }
@@ -356,9 +327,8 @@ class SaqueServiceTest {
         SaqueService umReal = servico();
         assertThat(umReal.moedasDe(new BigDecimal("15.50"))).isEqualByComparingTo("15.50");
 
-        SaqueService doisReais = new SaqueService(saques, carteiras, asaas, repasse,
-                new SaqueProperties(DONO, new BigDecimal("1000"), BigDecimal.ONE), java.time.Clock.systemUTC(),
-                mock(PlatformTransactionManager.class), 200); // 1 moeda = R$ 2
+        SaqueService doisReais = new SaqueService(saques, carteiras, asaas, repasse, usuarios,
+                java.time.Clock.systemUTC(), mock(PlatformTransactionManager.class), 200); // 1 moeda = R$ 2
         assertThat(doisReais.moedasDe(new BigDecimal("15.01"))).isEqualByComparingTo("7.51"); // arredonda para cima
         assertThat(doisReais.reaisDe(new BigDecimal("7.50"))).isEqualByComparingTo("15.00");
     }

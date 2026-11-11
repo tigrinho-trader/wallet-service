@@ -12,11 +12,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,9 +23,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Saque por Pix: troca moedas da carteira da plataforma por um Pix do caixa do Asaas. Precisa das TRES coisas:
- * moedas na carteira (1 moeda = R$ 1), dinheiro livre no caixa do Asaas (o saldo que nao veio das compras, ver
- * {@link RepasseService#caixaLivre()}) e limite diario. So para as contas de SAQUE_ADMINS; para o resto, nao existe.
+ * Saque por Pix: troca moedas da carteira da plataforma por um Pix do caixa do Asaas. Precisa das DUAS coisas:
+ * moedas na carteira (1 moeda = R$ 1) e dinheiro livre no caixa do Asaas (o saldo que nao veio das compras, ver
+ * {@link RepasseService#caixaLivre()}). So para contas ADMIN ativas (o user-service confirma); para o resto, nao existe.
  *
  * <p>Nunca paga duas vezes nem paga sem moeda: o debito das moedas e o registro do saque sao gravados juntos,
  * numa transacao, ANTES de chamar o Asaas. Se o Pix certamente nao saiu, as moedas voltam (uma vez so); sem
@@ -39,7 +35,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class SaqueService {
 
     private static final Logger log = LoggerFactory.getLogger(SaqueService.class);
-    static final ZoneId FUSO = ZoneId.of("America/Sao_Paulo");
+    /** Menor saque aceito. */
+    static final BigDecimal MINIMO = new BigDecimal("1.00");
     /** Um saque igual (mesma chave e valor) dentro deste tempo e tratado como clique repetido. */
     static final Duration JANELA_REPETIDO = Duration.ofMinutes(2);
     static final String DESCRICAO = "Saque Tigrinho Trader";
@@ -48,38 +45,28 @@ public class SaqueService {
     private final CarteiraService carteiras;
     private final AsaasCaixa asaas;
     private final RepasseService repasse;
-    private final SaqueProperties props;
+    private final ClienteUsuarios usuarios;
     private final Clock relogio;
     private final TransactionTemplate transacao;
     private final int centavosPorMoeda;
-    private final Set<String> admins;
 
     public SaqueService(SaquePixRepository saques, CarteiraService carteiras, AsaasCaixa asaas, RepasseService repasse,
-                        SaqueProperties props, Clock relogio, PlatformTransactionManager transacoes,
+                        ClienteUsuarios usuarios, Clock relogio, PlatformTransactionManager transacoes,
                         @Value("${wallet.pix.centavos-por-moeda:100}") int centavosPorMoeda) {
         this.saques = saques;
         this.carteiras = carteiras;
         this.asaas = asaas;
         this.repasse = repasse;
-        this.props = props;
+        this.usuarios = usuarios;
         this.relogio = relogio;
         this.transacao = new TransactionTemplate(transacoes);
         this.centavosPorMoeda = centavosPorMoeda > 0 ? centavosPorMoeda : 100;
-        this.admins = props.listaAdmins();
-        if (admins.isEmpty() || !asaas.configurado()) {
-            log.info("Saque Pix desligado ({})", admins.isEmpty() ? "SAQUE_ADMINS vazio" : "Asaas de producao nao configurado");
-        } else {
-            log.info("Saque Pix ligado para {} conta(s); limite diario R$ {}", admins.size(), props.limiteDiarioReais());
-        }
+        log.info("Saque Pix {}", asaas.configurado() ? "ligado para as contas ADMIN" : "desligado (Asaas de producao nao configurado)");
     }
 
-    /** Pode sacar: Asaas de producao configurado e a conta (id ou e-mail verificado) em SAQUE_ADMINS. */
-    public boolean permitido(String usuarioId, String email) {
-        if (!asaas.configurado() || usuarioId == null || usuarioId.isBlank()) {
-            return false;
-        }
-        return admins.contains(usuarioId.trim().toLowerCase(Locale.ROOT))
-                || (email != null && !email.isBlank() && admins.contains(email.trim().toLowerCase(Locale.ROOT)));
+    /** Pode sacar: Asaas de producao configurado e conta ADMIN ativa (perguntado ao user-service a cada vez). */
+    public boolean permitido(String usuarioId) {
+        return asaas.configurado() && usuarioId != null && !usuarioId.isBlank() && usuarios.admin(usuarioId);
     }
 
     /**
@@ -88,29 +75,27 @@ public class SaqueService {
      * @param caixa      dinheiro livre no Asaas
      */
     public record Resumo(boolean permitido, BigDecimal disponivel, BigDecimal moedas, BigDecimal caixa,
-                         BigDecimal restanteHoje, BigDecimal limiteDiario, BigDecimal minimo, List<SaquePix> recentes) {
+                         BigDecimal minimo, List<SaquePix> recentes) {
         static Resumo negado() {
-            return new Resumo(false, null, null, null, null, null, null, List.of());
+            return new Resumo(false, null, null, null, null, List.of());
         }
     }
 
-    /** Moedas, caixa, quanto ainda cabe hoje e os ultimos saques (os em aberto sao atualizados no Asaas). */
-    public Resumo resumo(String usuarioId, String email) {
-        if (!permitido(usuarioId, email)) {
+    /** Moedas, caixa e os ultimos saques (os em aberto sao atualizados no Asaas). */
+    public Resumo resumo(String usuarioId) {
+        if (!permitido(usuarioId)) {
             return Resumo.negado();
         }
         List<SaquePix> recentes = saques.findTop20ByUsuarioIdOrderByCriadoEmDesc(usuarioId).stream()
                 .map(s -> s.status.emAberto() ? atualizar(s) : s).toList();
         BigDecimal moedas = carteiras.obterOuCriar(usuarioId).getSaldo();
         BigDecimal caixa = repasse.caixaLivre();
-        BigDecimal restante = props.limiteDiarioReais().subtract(usadoHoje(usuarioId)).max(BigDecimal.ZERO);
         BigDecimal disponivel = reaisDe(moedas).min(caixa).max(BigDecimal.ZERO);
-        return new Resumo(true, disponivel, moedas, caixa, restante, props.limiteDiarioReais(), props.minimoReais(),
-                recentes);
+        return new Resumo(true, disponivel, moedas, caixa, MINIMO, recentes);
     }
 
-    public synchronized SaquePix sacar(String usuarioId, String email, String tipo, String chave, BigDecimal valor) {
-        if (!permitido(usuarioId, email)) {
+    public synchronized SaquePix sacar(String usuarioId, String tipo, String chave, BigDecimal valor) {
+        if (!permitido(usuarioId)) {
             throw new SaqueNaoPermitidoException();
         }
         ChavePix destino = ChavePix.de(tipo, chave);
@@ -118,18 +103,13 @@ public class SaqueService {
             throw new RegraNegocioException("Valor invalido: use reais com ate 2 casas");
         }
         BigDecimal quanto = valor.setScale(2);
-        if (quanto.compareTo(props.minimoReais()) < 0) {
-            throw new RegraNegocioException("O saque minimo e de R$ " + props.minimoReais());
+        if (quanto.compareTo(MINIMO) < 0) {
+            throw new RegraNegocioException("O saque minimo e de R$ " + MINIMO);
         }
         BigDecimal moedas = moedasDe(quanto);
         BigDecimal saldoMoedas = carteiras.obterOuCriar(usuarioId).getSaldo();
         if (moedas.compareTo(saldoMoedas) > 0) {
             throw semMoedas(saldoMoedas);
-        }
-        BigDecimal restante = props.limiteDiarioReais().subtract(usadoHoje(usuarioId)).max(BigDecimal.ZERO);
-        if (quanto.compareTo(restante) > 0) {
-            throw new RegraNegocioException("Passa do limite diario de R$ " + props.limiteDiarioReais()
-                    + ": restam R$ " + restante + " hoje");
         }
         Instant agora = relogio.instant();
         boolean repetido = saques.findTop20ByUsuarioIdOrderByCriadoEmDesc(usuarioId).stream()
@@ -231,14 +211,5 @@ public class SaqueService {
     /** Reais que as moedas valem (arredonda para baixo). */
     BigDecimal reaisDe(BigDecimal moedas) {
         return moedas.multiply(BigDecimal.valueOf(centavosPorMoeda)).movePointLeft(2).setScale(2, RoundingMode.DOWN);
-    }
-
-    /** Soma dos saques de hoje (horario de Brasilia) que sairam ou podem ter saido. */
-    private BigDecimal usadoHoje(String usuarioId) {
-        Instant inicioDoDia = LocalDate.ofInstant(relogio.instant(), FUSO).atStartOfDay(FUSO).toInstant();
-        return saques.findByUsuarioIdAndCriadoEmGreaterThanEqual(usuarioId, inicioDoDia).stream()
-                .filter(s -> s.status != Status.FALHOU)
-                .map(s -> s.valor)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 }
