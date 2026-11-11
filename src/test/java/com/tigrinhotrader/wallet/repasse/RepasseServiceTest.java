@@ -2,6 +2,7 @@ package com.tigrinhotrader.wallet.repasse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -32,7 +33,9 @@ class RepasseServiceTest {
     private static final String PONTE = "0x57dEdD9cb2408193bA442deA32601a9096354CcF";
 
     private final List<Repasse> banco = new ArrayList<>();
+    private final List<EntradaRepasse> fila = new ArrayList<>();
     private RepasseRepository repasses;
+    private EntradaRepasseRepository entradas;
     private AsaasCaixa asaas;
     private BinanceCaixa binance;
     private CarteiraBsc carteira;
@@ -53,6 +56,19 @@ class RepasseServiceTest {
                 .thenAnswer(i -> banco.stream().filter(r -> !r.etapa.finalizada()).findFirst());
         when(repasses.findFirstByOrderByCriadoEmDesc())
                 .thenAnswer(i -> banco.stream().max(Comparator.comparing(r -> r.criadoEm)));
+
+        entradas = mock(EntradaRepasseRepository.class);
+        when(entradas.save(any(EntradaRepasse.class))).thenAnswer(i -> guardar(i.getArgument(0)));
+        when(entradas.saveAll(anyIterable())).thenAnswer(i -> {
+            Iterable<EntradaRepasse> todas = i.getArgument(0);
+            todas.forEach(this::guardar);
+            return todas;
+        });
+        when(entradas.findByRepasseIdIsNullOrderByCriadaEmAsc())
+                .thenAnswer(i -> new ArrayList<>(fila.stream().filter(e -> e.repasseId == null).toList()));
+        when(entradas.findByRepasseId(any()))
+                .thenAnswer(i -> new ArrayList<>(fila.stream().filter(e -> i.getArgument(0).equals(e.repasseId)).toList()));
+        when(entradas.existsById(any())).thenAnswer(i -> fila.stream().anyMatch(e -> e.id.equals(i.getArgument(0))));
 
         asaas = mock(AsaasCaixa.class);
         binance = mock(BinanceCaixa.class);
@@ -78,11 +94,25 @@ class RepasseServiceTest {
             public Clock withZone(java.time.ZoneId z) { return this; }
             public Instant instant() { return agora; }
         };
-        return new RepasseService(repasses, asaas, binance, carteira, deriv, props, relogio) {
+        return new RepasseService(repasses, entradas, asaas, binance, carteira, deriv, props, relogio) {
             @Override
             void dormir(long ms) {
             }
         };
+    }
+
+    private EntradaRepasse guardar(EntradaRepasse e) {
+        if (!fila.contains(e)) {
+            fila.add(e);
+        }
+        return e;
+    }
+
+    /** Uma compra de moedas paga, na fila do repasse, com o valor liquido ja conhecido. */
+    private EntradaRepasse compra(String liquido) {
+        EntradaRepasse e = new EntradaRepasse(UUID.randomUUID(), "COB" + fila.size(), new BigDecimal(liquido), agora);
+        e.liquido = new BigDecimal(liquido);
+        return guardar(e);
     }
 
     private static String tlv(String id, String valor) {
@@ -106,6 +136,7 @@ class RepasseServiceTest {
 
     @Test
     void levaODinheiroDoAsaasAteAContaOptions() {
+        EntradaRepasse entrada = compra("57.21");
         binanceAbrePedidoComCodigo("57.21");
         when(asaas.saldo()).thenReturn(new BigDecimal("57.21"), BigDecimal.ZERO); // o Pix esvazia o Asaas
         when(binance.livre("BRL")).thenReturn(new BigDecimal("0.68"), new BigDecimal("57.89"));
@@ -135,10 +166,12 @@ class RepasseServiceTest {
         verify(carteira, times(1)).enviarUsdt(anyString(), any());
         verify(deriv, times(1)).transferirParaOptions(any(UUID.class));
         assertThat(banco.get(0).valorOptions).isEqualByComparingTo("10.37");
+        assertThat(entrada.repasseId).isEqualTo(banco.get(0).id); // a compra saiu da fila
     }
 
     @Test
     void asaasRecusandoOPixFalhaSemTentarDeNovoLogoEmSeguida() {
+        EntradaRepasse entrada = compra("57.21");
         binanceAbrePedidoComCodigo("57.21");
         when(binance.livre("BRL")).thenReturn(BigDecimal.ZERO);
         when(asaas.pagarPix(anyString(), any(), anyString())).thenThrow(new RepasseException("Asaas respondeu 400: saldo"));
@@ -151,6 +184,7 @@ class RepasseServiceTest {
         assertThat(banco.get(0).etapa).isEqualTo(Etapa.FALHOU);
         assertThat(banco.get(0).erro).contains("continua no Asaas");
         verify(binance, times(1)).pedirDepositoPix(any());
+        assertThat(entrada.repasseId).isNull(); // o dinheiro nao saiu: volta para a fila (nao vira caixa de saque)
     }
 
     @Test
@@ -158,16 +192,20 @@ class RepasseServiceTest {
         Repasse r = new Repasse(new BigDecimal("57.21"), agora);
         r.etapa = Etapa.PAGANDO;
         banco.add(r);
+        EntradaRepasse entrada = compra("57.21");
+        entrada.repasseId = r.id;
 
         servico(true, DERIV).ciclo();
 
         assertThat(r.etapa).isEqualTo(Etapa.FALHOU);
         assertThat(r.erro).contains("parou no meio");
         verify(asaas, never()).pagarPix(anyString(), any(), anyString());
+        assertThat(entrada.repasseId).isEqualTo(r.id); // nao se sabe se pagou: nao volta para a fila
     }
 
     @Test
     void codigoPixComValorDiferenteNaoEPago() {
+        EntradaRepasse entrada = compra("57.21");
         binanceAbrePedidoComCodigo("5721.00");
         when(binance.livre("BRL")).thenReturn(BigDecimal.ZERO);
 
@@ -175,11 +213,12 @@ class RepasseServiceTest {
 
         assertThat(banco.get(0).etapa).isEqualTo(Etapa.FALHOU);
         verify(asaas, never()).pagarPix(anyString(), any(), anyString());
+        assertThat(entrada.repasseId).isNull(); // nada foi pago: volta para a fila
     }
 
     @Test
-    void saldoAbaixoDoMinimoNaoIniciaRepasse() {
-        when(asaas.saldo()).thenReturn(new BigDecimal("12.00"));
+    void compraAbaixoDoMinimoNaoIniciaRepasse() {
+        compra("12.00");
 
         servico(true, DERIV).ciclo();
 
@@ -216,26 +255,27 @@ class RepasseServiceTest {
     }
 
     @Test
-    void ociosoSoConsultaOAsaasDeTemposEmTemposOuQuandoChegaPix() {
-        when(asaas.saldo()).thenReturn(BigDecimal.ZERO);
+    void ociosoSoConfereAFilaDeTemposEmTemposOuQuandoChegaPix() {
         RepasseService servico = servico(true, DERIV);
 
         servico.ciclo();                 // primeira consulta
         servico.ciclo();                 // logo depois: nao consulta de novo
-        verify(asaas, times(1)).saldo();
+        verify(entradas, times(1)).findByRepasseIdIsNullOrderByCriadaEmAsc();
+        verify(asaas, never()).saldo();  // fila vazia: nem pergunta o saldo
 
-        servico.pixRecebido();           // Pix confirmado: consulta ja no proximo ciclo
+        when(asaas.valorLiquido("COB1")).thenReturn(new BigDecimal("9.01"));
+        servico.pixRecebido(UUID.randomUUID(), "COB1", 1000); // Pix confirmado: consulta ja no proximo ciclo
         servico.ciclo();
-        verify(asaas, times(2)).saldo();
+        verify(entradas, times(2)).findByRepasseIdIsNullOrderByCriadaEmAsc();
 
         agora = agora.plus(Duration.ofMinutes(6)); // passou o intervalo ocioso
         servico.ciclo();
-        verify(asaas, times(3)).saldo();
+        verify(entradas, times(3)).findByRepasseIdIsNullOrderByCriadaEmAsc();
     }
 
     @Test
-    void saldoAbaixoDoSaqueMinimoDaBinanceFicaJuntando() {
-        when(asaas.saldo()).thenReturn(new BigDecimal("27.50")); // 27,50 / 5,47 = 5,03 USDT < 5 x 1,02
+    void comprasAbaixoDoSaqueMinimoDaBinanceFicamJuntando() {
+        compra("27.50"); // 27,50 / 5,47 = 5,03 USDT < 5 x 1,02
 
         servico(true, DERIV).ciclo();
 
@@ -249,5 +289,79 @@ class RepasseServiceTest {
         assertThat(RepasseConfig.preenchido("  ", "geral")).isEqualTo("geral");
         assertThat(RepasseConfig.preenchido(null, "geral")).isEqualTo("geral");
         assertThat(RepasseConfig.preenchido("propria", "geral")).isEqualTo("propria");
+    }
+
+    @Test
+    void caixaDeSaqueNaoVaiParaADeriv() {
+        when(asaas.saldo()).thenReturn(new BigDecimal("357.21")); // R$ 300 de caixa + R$ 57,21 de compras
+        compra("57.21");
+        binanceAbrePedidoComCodigo("57.21");
+        when(binance.livre("BRL")).thenReturn(BigDecimal.ZERO);
+        when(asaas.pagarPix(anyString(), any(), anyString())).thenReturn(new AsaasCaixa.Pix("PIX1", "AWAITING_REQUEST", null));
+
+        servico(true, DERIV).ciclo();
+
+        assertThat(banco.get(0).valorReais).isEqualByComparingTo("57.21");
+        verify(asaas).pagarPix(anyString(), eq(new BigDecimal("57.21")), anyString());
+    }
+
+    @Test
+    void semCompraNaFilaNaoRepassaNemComSaldoNoAsaas() {
+        when(asaas.saldo()).thenReturn(new BigDecimal("300.00")); // recarga feita direto no Asaas
+
+        servico(true, DERIV).ciclo();
+
+        assertThat(banco).isEmpty();
+        verify(binance, never()).pedirDepositoPix(any());
+    }
+
+    @Test
+    void valorLiquidoDaCompraVemDoAsaas() {
+        EntradaRepasse e = guardar(new EntradaRepasse(UUID.randomUUID(), "COBX", new BigDecimal("60.00"), agora));
+        when(asaas.valorLiquido("COBX")).thenReturn(new BigDecimal("59.01"));
+        when(asaas.saldo()).thenReturn(new BigDecimal("400.00"));
+        when(binance.pedirDepositoPix(new BigDecimal("59.01"))).thenReturn("ORD2");
+        when(binance.codigoPix("ORD2")).thenReturn(codigoPix("59.01"));
+        when(binance.livre("BRL")).thenReturn(BigDecimal.ZERO);
+        when(asaas.pagarPix(anyString(), any(), anyString())).thenReturn(new AsaasCaixa.Pix("PIX2", "AWAITING_REQUEST", null));
+
+        servico(true, DERIV).ciclo();
+
+        assertThat(e.liquido).isEqualByComparingTo("59.01");
+        assertThat(banco.get(0).valorReais).isEqualByComparingTo("59.01"); // a taxa do Asaas nao sai do caixa
+    }
+
+    @Test
+    void pixRecebidoEntraNaFilaUmaVezESoComORepasseLigado() {
+        UUID compraId = UUID.randomUUID();
+        RepasseService servico = servico(true, DERIV);
+        servico.pixRecebido(compraId, "COB1", 6000);
+        servico.pixRecebido(compraId, "COB1", 6000); // a mesma compra de novo nao duplica
+
+        assertThat(fila).hasSize(1);
+        assertThat(fila.get(0).bruto).isEqualByComparingTo("60.00");
+
+        servico(false, DERIV).pixRecebido(UUID.randomUUID(), "COB2", 5000); // desligado: o dinheiro fica no Asaas
+        assertThat(fila).hasSize(1);
+    }
+
+    @Test
+    void caixaLivreDescontaAFilaEORepasseQueAindaEstaNoAsaas() {
+        when(asaas.saldo()).thenReturn(new BigDecimal("400.00"));
+        compra("50.00");
+        guardar(new EntradaRepasse(UUID.randomUUID(), "COBY", new BigDecimal("20.00"), agora)); // liquido ainda nao
+        EntradaRepasse jaLevada = compra("99.00");
+        jaLevada.repasseId = UUID.randomUUID();
+        Repasse emAndamento = new Repasse(new BigDecimal("30.00"), agora);
+        banco.add(emAndamento);
+
+        RepasseService servico = servico(true, DERIV);
+        assertThat(servico.caixaLivre()).isEqualByComparingTo("300.00"); // 400 - 50 - 20 - 30
+
+        emAndamento.etapa = Etapa.AGUARDANDO_BRL; // o Pix ja saiu do Asaas
+        assertThat(servico.caixaLivre()).isEqualByComparingTo("330.00");
+
+        when(asaas.saldo()).thenReturn(new BigDecimal("10.00"));
+        assertThat(servico.caixaLivre()).isEqualByComparingTo("0.00"); // nunca negativo
     }
 }

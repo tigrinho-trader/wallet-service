@@ -3,6 +3,7 @@ package com.tigrinhotrader.wallet.web;
 import com.tigrinhotrader.wallet.dominio.SaldoInsuficienteException;
 import com.tigrinhotrader.wallet.pix.CompraNaoEncontradaException;
 import com.tigrinhotrader.wallet.pix.PixIndisponivelException;
+import com.tigrinhotrader.wallet.saque.SaqueNaoPermitidoException;
 import com.tigrinhotrader.wallet.servico.CupomJaUsadoException;
 import com.tigrinhotrader.wallet.servico.RegraNegocioException;
 import org.springframework.http.HttpStatus;
@@ -24,8 +25,8 @@ public class TratadorErros {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 
-    @ExceptionHandler(CompraNaoEncontradaException.class)
-    ProblemDetail naoEncontrada(CompraNaoEncontradaException e) {
+    @ExceptionHandler({CompraNaoEncontradaException.class, SaqueNaoPermitidoException.class})
+    ProblemDetail naoEncontrada(RuntimeException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
     }
 

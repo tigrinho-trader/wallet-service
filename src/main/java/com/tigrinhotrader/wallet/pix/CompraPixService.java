@@ -107,7 +107,8 @@ public class CompraPixService {
         if (compra.atualizarStatus(status, agora)) {
             carteiras.creditarCompra(compra.getUsuarioId(), BigDecimal.valueOf(compra.getMoedas()),
                     compra.getCobrancaId(), "Compra Pix: " + compra.getMoedas() + " moedas");
-            repasse.pixRecebido(); // o dinheiro ja esta no Asaas: o repasse para a Deriv comeca em ate 15 s
+            // o dinheiro ja esta no Asaas: entra na fila e o repasse para a Deriv comeca em ate 15 s
+            repasse.pixRecebido(compra.getId(), compra.getCobrancaId(), compra.getCentavos());
         }
         compras.save(compra);
     }

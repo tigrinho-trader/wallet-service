@@ -66,6 +66,12 @@ wallet:
     # token proprio do repasse (precisa da permissao "payment"); vazio = usa DERIV_API_TOKEN/DERIV_APP_ID
     deriv-token: ${REPASSE_DERIV_TOKEN:}
     deriv-app-id: ${REPASSE_DERIV_APP_ID:}
+  # Saque por Pix do caixa do Asaas (o saldo que NAO veio de compras de moedas: as compras vao para a Deriv).
+  # So para as contas de SAQUE_ADMINS (id do login ou e-mail, separados por virgula); vazio = desligado.
+  saque:
+    admins: ${SAQUE_ADMINS:}
+    limite-diario-reais: ${SAQUE_LIMITE_DIARIO_REAIS:1000}
+    minimo-reais: ${SAQUE_MINIMO_REAIS:1}
 
 management:
   endpoints:

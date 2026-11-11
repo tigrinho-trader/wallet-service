@@ -121,6 +121,46 @@ public class CarteiraService {
     }
 
     /**
+     * Debita as moedas de um saque por Pix. Roda dentro da transacao que grava o saque: se faltar moeda, nada e
+     * gravado e nenhum Pix e pedido. A referencia ({@code saque-pix:ID}) e unica: o mesmo saque nunca debita duas vezes.
+     *
+     * @throws SaldoInsuficienteException se a carteira tem menos moedas que o saque
+     */
+    @Transactional
+    public Carteira debitarSaquePix(String usuarioId, BigDecimal moedas, String referencia, String descricao) {
+        if (transacoes.existsByReferencia(referencia)) {
+            throw new IllegalStateException("Saque ja debitado: " + referencia);
+        }
+        Carteira carteira = obterOuCriar(usuarioId);
+        Instant agora = relogio.instant();
+        carteira.debitar(moedas, agora);
+        carteiras.save(carteira);
+        transacoes.saveAndFlush(new Transacao(usuarioId, TipoTransacao.SAQUE_PIX, moedas.negate(), carteira.getSaldo(),
+                referencia, descricao, agora));
+        return carteira;
+    }
+
+    /**
+     * Devolve as moedas de um saque cujo Pix certamente nao saiu. Idempotente pela referencia
+     * ({@code estorno-saque-pix:ID}): devolve uma vez so.
+     *
+     * @return false se ja tinha devolvido
+     */
+    @Transactional
+    public boolean estornarSaquePix(String usuarioId, BigDecimal moedas, String referencia, String descricao) {
+        if (transacoes.existsByReferencia(referencia)) {
+            return false;
+        }
+        Carteira carteira = obterOuCriar(usuarioId);
+        Instant agora = relogio.instant();
+        carteira.creditar(moedas, agora);
+        carteiras.save(carteira);
+        transacoes.saveAndFlush(new Transacao(usuarioId, TipoTransacao.ESTORNO_SAQUE_PIX, moedas, carteira.getSaldo(),
+                referencia, descricao, agora));
+        return true;
+    }
+
+    /**
      * Credita um cupom. Cada conta resgata uma vez: a referencia ({@code cupom:CODIGO:usuario}) e unica no banco.
      * O saveAndFlush grava a transacao aqui dentro, entao uma corrida com outro pedido igual aparece como
      * violacao de unicidade ao sair do metodo (quem chama trata, ver {@link CupomService}).

@@ -18,13 +18,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * Repasse automatico do saldo do Asaas para a conta Options da Deriv:
+ * Repasse automatico das compras de moedas do Asaas para a conta Options da Deriv:
  *
  * <pre>
  * Asaas --Pix--> Binance (BRL -> USDT) --saque BSC--> carteira ponte --BSC--> carteira Deriv --> conta Options (USD)
  * </pre>
  *
- * A cada ciclo avanca no maximo o repasse em andamento (um por vez) ou inicia um novo se o Asaas tiver saldo.
+ * Leva so o que entrou por compra de moedas ({@link EntradaRepasse}), nunca o saldo inteiro: o resto do Asaas e o
+ * caixa de saque do dono ({@link #caixaLivre()}), e recargas feitas direto no Asaas ficam la.
+ * A cada ciclo avanca no maximo o repasse em andamento (um por vez) ou inicia um novo se houver entradas na fila.
  * Regra de seguranca: antes de cada operacao com dinheiro a etapa "em curso" e gravada; se o servico parar
  * no meio dela, o repasse e marcado como FALHOU (para conferir) em vez de repetir — nunca paga duas vezes.
  * Falha com resposta do servico ({@link RepasseException}) e certa: vira FALHOU dizendo onde o dinheiro ficou.
@@ -38,7 +40,11 @@ public class RepasseService {
     /** Folga sobre o saque minimo da Binance, para a cotacao mudar entre a conferencia e a compra. */
     private static final BigDecimal FOLGA_MINIMO = new BigDecimal("1.02");
 
+    /** Etapas em que o dinheiro do repasse ainda pode estar no saldo do Asaas. */
+    private static final EnumSet<Etapa> AINDA_NO_ASAAS = EnumSet.of(Etapa.NOVO, Etapa.PAGANDO, Etapa.PIX_ENVIADO);
+
     private final RepasseRepository repasses;
+    private final EntradaRepasseRepository entradas;
     private final AsaasCaixa asaas;
     private final BinanceCaixa binance;
     private final CarteiraBsc carteira;
@@ -51,9 +57,11 @@ public class RepasseService {
     private String ultimaEspera = "";
     private Instant ultimoAvisoEspera = Instant.EPOCH;
 
-    public RepasseService(RepasseRepository repasses, AsaasCaixa asaas, BinanceCaixa binance, CarteiraBsc carteira,
-                          DerivCaixa deriv, RepasseProperties props, Clock relogio) {
+    public RepasseService(RepasseRepository repasses, EntradaRepasseRepository entradas, AsaasCaixa asaas,
+                          BinanceCaixa binance, CarteiraBsc carteira, DerivCaixa deriv, RepasseProperties props,
+                          Clock relogio) {
         this.repasses = repasses;
+        this.entradas = entradas;
         this.asaas = asaas;
         this.binance = binance;
         this.carteira = carteira;
@@ -80,9 +88,36 @@ public class RepasseService {
         return ativo;
     }
 
-    /** Um Pix de compra foi confirmado: o proximo ciclo (em ate 15 s) ja confere o saldo e inicia o repasse. */
-    public void pixRecebido() {
+    /**
+     * Um Pix de compra foi confirmado: entra na fila e o proximo ciclo (em ate 15 s) ja inicia o repasse.
+     * Roda dentro da transacao da compra. Com o repasse desligado nada entra na fila: o dinheiro fica no Asaas.
+     */
+    public void pixRecebido(UUID compraId, String cobrancaId, long centavos) {
+        if (!ativo || entradas.existsById(compraId)) {
+            return;
+        }
+        entradas.save(new EntradaRepasse(compraId, cobrancaId, BigDecimal.valueOf(centavos, 2), relogio.instant()));
         pixNovo = true;
+    }
+
+    /**
+     * Quanto do saldo do Asaas e do dono (pode sair por saque): o saldo menos as compras na fila e o repasse
+     * cujo dinheiro ainda pode estar no Asaas. Mesmo trava do ciclo: nunca calcula no meio de um repasse.
+     */
+    public synchronized BigDecimal caixaLivre() {
+        return comCaixaLivre(livre -> livre);
+    }
+
+    /** Roda {@code acao} com o caixa livre, sem nenhum ciclo do repasse no meio (para o saque conferir e pagar). */
+    public synchronized <T> T comCaixaLivre(java.util.function.Function<BigDecimal, T> acao) {
+        BigDecimal reservado = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc().stream()
+                .map(EntradaRepasse::reservado).reduce(BigDecimal.ZERO, BigDecimal::add);
+        var emAndamento = repasses.findFirstByEtapaNotInOrderByCriadoEmAsc(FINALIZADAS);
+        if (emAndamento.isPresent() && AINDA_NO_ASAAS.contains(emAndamento.get().etapa)) {
+            reservado = reservado.add(emAndamento.get().valorReais);
+        }
+        BigDecimal livre = asaas.saldo().subtract(reservado).max(BigDecimal.ZERO).setScale(2, RoundingMode.DOWN);
+        return acao.apply(livre);
     }
 
     @Scheduled(fixedDelayString = "${wallet.repasse.intervalo-ms:60000}",
@@ -98,7 +133,7 @@ public class RepasseService {
             } else if (pixNovo || !relogio.instant().isBefore(ultimaConsulta.plus(props.consultaOciosa()))) {
                 pixNovo = false;
                 ultimaConsulta = relogio.instant();
-                iniciarSeHouverSaldo();
+                iniciarSeHouverEntradas();
             }
         } catch (Exception e) {
             // sem resposta (rede): tenta de novo no proximo ciclo; etapas "em curso" viram FALHOU la
@@ -106,29 +141,46 @@ public class RepasseService {
         }
     }
 
-    void iniciarSeHouverSaldo() {
+    void iniciarSeHouverEntradas() {
         var ultimo = repasses.findFirstByOrderByCriadoEmDesc();
         if (ultimo.isPresent() && ultimo.get().etapa == Etapa.FALHOU
                 && ultimo.get().atualizadoEm.plus(props.esperaAposFalha()).isAfter(relogio.instant())) {
             return; // da tempo de conferir a falha antes de mover mais dinheiro
         }
-        BigDecimal saldo = asaas.saldo().setScale(2, RoundingMode.DOWN);
-        if (saldo.signum() <= 0 || saldo.compareTo(props.minimoReais()) < 0) {
+        List<EntradaRepasse> fila = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc();
+        if (fila.isEmpty()) {
+            return; // nenhuma compra para repassar: o saldo do Asaas e todo do caixa de saque
+        }
+        BigDecimal aRepassar = BigDecimal.ZERO;
+        for (EntradaRepasse e : fila) {
+            if (e.liquido == null) {
+                e.liquido = asaas.valorLiquido(e.cobrancaId);
+                entradas.save(e);
+            }
+            aRepassar = aRepassar.add(e.liquido);
+        }
+        // nunca mais que o saldo: se faltar, leva o que ha (e o caixa de saque nao paga a diferenca)
+        BigDecimal valor = aRepassar.min(asaas.saldo()).setScale(2, RoundingMode.DOWN);
+        if (valor.signum() <= 0 || valor.compareTo(props.minimoReais()) < 0) {
             return;
         }
         BinanceCaixa.Rede rede = binance.redeBsc("USDT");
-        BigDecimal usdtEstimado = saldo.divide(binance.preco("USDTBRL"), 8, RoundingMode.DOWN);
+        BigDecimal usdtEstimado = valor.divide(binance.preco("USDTBRL"), 8, RoundingMode.DOWN);
         if (usdtEstimado.compareTo(rede.minimo().multiply(FOLGA_MINIMO)) < 0) {
-            log.info("Repasse Deriv: R$ {} no Asaas (~{} USDT) ainda abaixo do saque minimo da Binance ({} USDT); juntando",
-                    saldo, usdtEstimado.setScale(2, RoundingMode.DOWN), rede.minimo());
+            log.info("Repasse Deriv: R$ {} de compras na fila (~{} USDT) ainda abaixo do saque minimo da Binance ({} USDT); juntando",
+                    valor, usdtEstimado.setScale(2, RoundingMode.DOWN), rede.minimo());
             return;
         }
         if (!carteira.gasSuficiente()) {
             log.warn("Repasse Deriv: carteira ponte {} sem BNB para as taxas; mande um pouco de BNB para ela", carteira.endereco());
             return;
         }
-        Repasse r = repasses.save(new Repasse(saldo, relogio.instant()));
-        log.info("Repasse {}: iniciado com R$ {}", r.id, saldo);
+        Repasse r = new Repasse(valor, relogio.instant());
+        // marca as entradas antes de gravar o repasse: se parar entre os dois, o dinheiro fica no Asaas (nunca repassa duas vezes)
+        fila.forEach(e -> e.repasseId = r.id);
+        entradas.saveAll(fila);
+        repasses.save(r);
+        log.info("Repasse {}: iniciado com R$ {} ({} compra(s))", r.id, valor, fila.size());
         avancar(r);
     }
 
@@ -169,7 +221,7 @@ public class RepasseService {
             AsaasCaixa.Pix pix = asaas.pagarPix(codigo, r.valorReais, "Repasse Binance " + r.binanceOrdem);
             r.pixAsaasId = pix.id();
         } catch (RepasseException e) {
-            falhar(r, "o Asaas recusou o Pix (" + e.getMessage() + "); o dinheiro continua no Asaas");
+            falharComDinheiroNoAsaas(r, "o Asaas recusou o Pix (" + e.getMessage() + "); o dinheiro continua no Asaas");
             return;
         }
         mudar(r, Etapa.PIX_ENVIADO);
@@ -192,8 +244,8 @@ public class RepasseService {
         if (pix.concluido()) {
             mudar(r, Etapa.AGUARDANDO_BRL);
         } else if (pix.recusado()) {
-            falhar(r, "o Asaas nao enviou o Pix (" + pix.status() + " " + (pix.motivo() == null ? "" : pix.motivo())
-                    + "); o dinheiro continua no Asaas");
+            falharComDinheiroNoAsaas(r, "o Asaas nao enviou o Pix (" + pix.status() + " "
+                    + (pix.motivo() == null ? "" : pix.motivo()) + "); o dinheiro continua no Asaas");
         } else if (pix.aguardandoAutorizacao()) {
             log.warn("Repasse {}: o Pix aguarda autorizacao no app do Asaas (evento critico de saque ligado)", r.id);
         } else {
@@ -287,7 +339,27 @@ public class RepasseService {
         log.info("Repasse {}: CONCLUIDO. R$ {} viraram ~{} USD na conta Options", r.id, r.valorReais, r.valorOptions);
     }
 
+    /**
+     * Falha em que o dinheiro nao saiu do Asaas: as compras voltam para a fila (o proximo repasse, depois da espera
+     * apos falha, leva de novo) em vez de virarem caixa de saque.
+     */
+    private void falharComDinheiroNoAsaas(Repasse r, String motivo) {
+        devolverParaAFila(r);
+        falhar(r, motivo);
+    }
+
+    private void devolverParaAFila(Repasse r) {
+        List<EntradaRepasse> levadas = entradas.findByRepasseId(r.id);
+        if (!levadas.isEmpty()) {
+            levadas.forEach(e -> e.repasseId = null);
+            entradas.saveAll(levadas);
+        }
+    }
+
     private void falhar(Repasse r, String motivo) {
+        if (r.etapa == Etapa.NOVO) {
+            devolverParaAFila(r); // ainda NOVO = nada foi pago (sem codigo Pix, valor errado, prazo)
+        }
         String onde = r.etapa.ondeEstaODinheiro == null ? "confira Asaas, Binance, carteira ponte e Deriv"
                 : "o dinheiro esta em: " + r.etapa.ondeEstaODinheiro;
         r.erro = (motivo + " | " + onde).substring(0, Math.min(500, (motivo + " | " + onde).length()));
