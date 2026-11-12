@@ -25,7 +25,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Saque por Pix: troca moedas da carteira da plataforma por um Pix do caixa do Asaas. Precisa das DUAS coisas:
  * moedas na carteira (1 moeda = R$ 1) e dinheiro livre no caixa do Asaas (o saldo que nao veio das compras, ver
- * {@link RepasseService#caixaLivre()}). So para contas ADMIN ativas (o user-service confirma); para o resto, nao existe.
+ * {@link RepasseService#caixaLivre()}). Qualquer conta logada pode sacar (o jogo nao e publico).
  *
  * <p>Nunca paga duas vezes nem paga sem moeda: o debito das moedas e o registro do saque sao gravados juntos,
  * numa transacao, ANTES de chamar o Asaas. Se o Pix certamente nao saiu, as moedas voltam (uma vez so); sem
@@ -45,28 +45,26 @@ public class SaqueService {
     private final CarteiraService carteiras;
     private final AsaasCaixa asaas;
     private final RepasseService repasse;
-    private final ClienteUsuarios usuarios;
     private final Clock relogio;
     private final TransactionTemplate transacao;
     private final int centavosPorMoeda;
 
     public SaqueService(SaquePixRepository saques, CarteiraService carteiras, AsaasCaixa asaas, RepasseService repasse,
-                        ClienteUsuarios usuarios, Clock relogio, PlatformTransactionManager transacoes,
+                        Clock relogio, PlatformTransactionManager transacoes,
                         @Value("${wallet.pix.centavos-por-moeda:100}") int centavosPorMoeda) {
         this.saques = saques;
         this.carteiras = carteiras;
         this.asaas = asaas;
         this.repasse = repasse;
-        this.usuarios = usuarios;
         this.relogio = relogio;
         this.transacao = new TransactionTemplate(transacoes);
         this.centavosPorMoeda = centavosPorMoeda > 0 ? centavosPorMoeda : 100;
-        log.info("Saque Pix {}", asaas.configurado() ? "ligado para as contas ADMIN" : "desligado (Asaas de producao nao configurado)");
+        log.info("Saque Pix {}", asaas.configurado() ? "ligado" : "desligado (Asaas de producao nao configurado)");
     }
 
-    /** Pode sacar: Asaas de producao configurado e conta ADMIN ativa (perguntado ao user-service a cada vez). */
+    /** Pode sacar: Asaas de producao configurado e conta logada. */
     public boolean permitido(String usuarioId) {
-        return asaas.configurado() && usuarioId != null && !usuarioId.isBlank() && usuarios.admin(usuarioId);
+        return asaas.configurado() && usuarioId != null && !usuarioId.isBlank();
     }
 
     /**

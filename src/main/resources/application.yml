@@ -66,9 +66,6 @@ wallet:
     # token proprio do repasse (precisa da permissao "payment"); vazio = usa DERIV_API_TOKEN/DERIV_APP_ID
     deriv-token: ${REPASSE_DERIV_TOKEN:}
     deriv-app-id: ${REPASSE_DERIV_APP_ID:}
-  # user-service na rede interna: o saque Pix so vale para contas ADMIN (GET /interno/usuarios/{id}/admin)
-  usuarios:
-    url: ${USER_URL:http://localhost:8085}
 
 management:
   endpoints:

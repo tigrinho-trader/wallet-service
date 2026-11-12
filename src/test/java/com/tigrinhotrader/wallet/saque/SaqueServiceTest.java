@@ -51,7 +51,6 @@ class SaqueServiceTest {
     private CarteiraService carteiras;
     private AsaasCaixa asaas;
     private RepasseService repasse;
-    private ClienteUsuarios usuarios;
     private BigDecimal moedas = new BigDecimal("1000.00");   // saldo da carteira na plataforma
     private BigDecimal livre = new BigDecimal("300.00");     // caixa livre no Asaas
     private Instant agora = Instant.parse("2026-11-11T15:00:00Z"); // 12h em Brasilia
@@ -98,9 +97,6 @@ class SaqueServiceTest {
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
                 .thenReturn(new Transferencia("T1", "PENDING", true, BigDecimal.ZERO, "OSCAR R DE S FILHO", null));
 
-        usuarios = mock(ClienteUsuarios.class);
-        when(usuarios.admin(DONO)).thenReturn(true);   // o user-service diz quem e ADMIN
-
         repasse = mock(RepasseService.class);
         when(repasse.caixaLivre()).thenAnswer(i -> livre);
         when(repasse.comCaixaLivre(any())).thenAnswer(i -> {
@@ -115,8 +111,7 @@ class SaqueServiceTest {
             public Clock withZone(java.time.ZoneId z) { return this; }
             public Instant instant() { return agora; }
         };
-        return new SaqueService(saques, carteiras, asaas, repasse, usuarios, relogio,
-                mock(PlatformTransactionManager.class), 100);
+        return new SaqueService(saques, carteiras, asaas, repasse, relogio, mock(PlatformTransactionManager.class), 100);
     }
 
     // ---------------------------------------------------------------- moedas da plataforma
@@ -236,16 +231,13 @@ class SaqueServiceTest {
     // ---------------------------------------------------------------- caixa do Asaas, limite e permissao
 
     @Test
-    void soContaAdminPodeSacar() {
+    void qualquerContaLogadaPodeSacar() {
         SaqueService servico = servico();
 
         assertThat(servico.permitido(DONO)).isTrue();
-        assertThat(servico.permitido("google|outro")).isFalse(); // o user-service disse que nao e ADMIN
-        assertThat(servico.resumo("google|outro").permitido()).isFalse();
-        assertThatThrownBy(() -> servico.sacar("google|outro", "CPF", CPF, BigDecimal.TEN))
-                .isInstanceOf(SaqueNaoPermitidoException.class);
-        verify(carteiras, never()).debitarSaquePix(anyString(), any(), anyString(), anyString());
-        verify(asaas, never()).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
+        assertThat(servico.permitido("google|outra-conta")).isTrue();
+        assertThat(servico.permitido(" ")).isFalse();
+        assertThat(servico.permitido(null)).isFalse();
     }
 
     @Test
@@ -327,8 +319,8 @@ class SaqueServiceTest {
         SaqueService umReal = servico();
         assertThat(umReal.moedasDe(new BigDecimal("15.50"))).isEqualByComparingTo("15.50");
 
-        SaqueService doisReais = new SaqueService(saques, carteiras, asaas, repasse, usuarios,
-                java.time.Clock.systemUTC(), mock(PlatformTransactionManager.class), 200); // 1 moeda = R$ 2
+        SaqueService doisReais = new SaqueService(saques, carteiras, asaas, repasse, java.time.Clock.systemUTC(),
+                mock(PlatformTransactionManager.class), 200); // 1 moeda = R$ 2
         assertThat(doisReais.moedasDe(new BigDecimal("15.01"))).isEqualByComparingTo("7.51"); // arredonda para cima
         assertThat(doisReais.reaisDe(new BigDecimal("7.50"))).isEqualByComparingTo("15.00");
     }

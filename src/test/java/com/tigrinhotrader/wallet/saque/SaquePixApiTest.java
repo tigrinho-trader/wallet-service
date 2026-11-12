@@ -28,8 +28,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
- * Saque Pix pela API, com a carteira e o banco de verdade (so o Asaas e o user-service sao falsos): so conta ADMIN
- * ve e usa, e nunca se saca mais moedas do que a carteira tem, mesmo com dinheiro sobrando no Asaas.
+ * Saque Pix pela API, com a carteira e o banco de verdade (so o Asaas e falso): nunca se saca mais moedas do que a
+ * carteira tem, mesmo com dinheiro sobrando no Asaas.
  */
 @SpringBootTest(properties = "wallet.saldo-inicial=0") // sem bonus de boas-vindas: cada teste da as moedas que quer
 @AutoConfigureMockMvc
@@ -46,15 +46,12 @@ class SaquePixApiTest {
     private RabbitTemplate rabbitTemplate;
     @MockBean
     private AsaasCaixa asaas;
-    @MockBean
-    private ClienteUsuarios usuarios;
 
     private String usuario;
 
     @BeforeEach
     void preparar() {
         usuario = "auth0|api-" + CONTADOR.incrementAndGet();
-        when(usuarios.admin(usuario)).thenReturn(true);   // o dono e ADMIN; qualquer outro id nao
         when(asaas.configurado()).thenReturn(true);
         when(asaas.saldo()).thenReturn(new BigDecimal("300.00"));
         when(asaas.transferirPix(anyString(), anyString(), any(), anyString(), anyString()))
@@ -75,20 +72,22 @@ class SaquePixApiTest {
     }
 
     @Test
-    void quemNaoEAdminNaoVeOSaque() throws Exception {
+    void semAsaasDeProducaoOSaqueNaoExiste() throws Exception {
         moedas("100");
-        when(usuarios.admin(usuario)).thenReturn(false);
+        when(asaas.configurado()).thenReturn(false);
         mockMvc.perform(get("/carteira/saques-pix").header("X-Usuario-Id", usuario))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.permitido").value(false))
                 .andExpect(jsonPath("$.disponivel").doesNotExist());
 
-        mockMvc.perform(post("/carteira/saques-pix").header("X-Usuario-Id", usuario)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tipoChave\":\"CPF\",\"chave\":\"52998224725\",\"valor\":10}"))
-                .andExpect(status().isNotFound());
+        sacar("{\"tipoChave\":\"CPF\",\"chave\":\"52998224725\",\"valor\":10}").andExpect(status().isNotFound());
         verify(asaas, never()).transferirPix(anyString(), anyString(), any(), anyString(), anyString());
         carteira().andExpect(jsonPath("$.saldo").value(100.0));
+    }
+
+    @Test
+    void semUsuarioLogadoDa401() throws Exception {
+        mockMvc.perform(get("/carteira/saques-pix")).andExpect(status().isUnauthorized());
     }
 
     @Test

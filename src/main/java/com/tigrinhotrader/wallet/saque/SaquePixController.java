@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Saque por Pix do caixa do Asaas. O gateway apaga os X-Usuario-* do cliente e preenche com os do token, entao o
- * id aqui e confiavel. Quem nao e ADMIN recebe {@code permitido: false} no GET e 404 no POST.
+ * id aqui e confiavel. Sem o Asaas de producao: {@code permitido: false} no GET e 404 no POST.
  */
 @RestController
 @RequestMapping("/carteira/saques-pix")
