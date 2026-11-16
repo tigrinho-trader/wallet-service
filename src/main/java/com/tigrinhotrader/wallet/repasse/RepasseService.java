@@ -144,7 +144,8 @@ public class RepasseService {
 
     void iniciarSeHouverEntradas() {
         if (bloqueadoAte().isPresent()) {
-            return; // da tempo de conferir a falha antes de mover mais dinheiro (ou liberar no painel)
+            pixNovo = true; // acabou de falhar: confere de novo a cada ciclo e tenta assim que passar o minuto
+            return;
         }
         List<EntradaRepasse> fila = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc();
         if (fila.isEmpty()) {
@@ -183,23 +184,20 @@ public class RepasseService {
         avancar(r);
     }
 
-    /**
-     * Ate quando a ultima falha segura os repasses novos ({@code esperaAposFalha} depois dela), ou vazio. Uma falha
-     * conferida no painel nao segura.
-     */
+    /** Ate quando a ultima falha segura a proxima tentativa ({@code esperaAposFalha} depois dela), ou vazio. */
     Optional<Instant> bloqueadoAte() {
         return repasses.findFirstByOrderByCriadoEmDesc()
-                .filter(r -> r.etapa == Etapa.FALHOU && !r.isConferido())
+                .filter(r -> r.etapa == Etapa.FALHOU)
                 .map(r -> r.atualizadoEm.plus(props.esperaAposFalha()))
                 .filter(ate -> ate.isAfter(relogio.instant()));
     }
 
     /** Um repasse para o painel. */
     public record Resumo(UUID id, String etapa, String ondeEstaODinheiro, BigDecimal valorReais, Instant criadoEm,
-                         Instant atualizadoEm, String erro, boolean conferido) {
+                         Instant atualizadoEm, String erro) {
         static Resumo de(Repasse r) {
             return new Resumo(r.getId(), r.getEtapa().name(), r.getOndeEstaODinheiro(), r.getValorReais(),
-                    r.getCriadoEm(), r.getAtualizadoEm(), r.getErro(), r.isConferido());
+                    r.getCriadoEm(), r.getAtualizadoEm(), r.getErro());
         }
     }
 
@@ -228,7 +226,7 @@ public class RepasseService {
             motivo = "Repasse em andamento (" + r.etapa + "): o dinheiro esta em "
                     + (r.etapa.ondeEstaODinheiro == null ? "transito" : r.etapa.ondeEstaODinheiro);
         } else if (bloqueado != null) {
-            motivo = "A ultima tentativa falhou: os repasses novos esperam ate a falha ser conferida (ou ate o horario)";
+            motivo = "A ultima tentativa falhou: tenta de novo em instantes (veja o erro abaixo)";
         } else if (fila.isEmpty()) {
             motivo = "Nada na fila: so as compras de moedas pelo jogo vao para a Binance";
         } else if (minimo != null && valor.compareTo(minimo) < 0) {
@@ -249,25 +247,6 @@ public class RepasseService {
         } catch (RuntimeException e) {
             return null;
         }
-    }
-
-    /**
-     * O super-admin conferiu a ultima falha no painel: ela deixa de segurar os repasses novos e o proximo ciclo (ate
-     * 15 s) ja olha a fila. Nao refaz nada do repasse que falhou.
-     *
-     * @return false se a ultima nao e uma falha (ou ja foi conferida)
-     */
-    public synchronized boolean liberarAposFalha() {
-        Optional<Repasse> ultimo = repasses.findFirstByOrderByCriadoEmDesc()
-                .filter(r -> r.etapa == Etapa.FALHOU && !r.isConferido());
-        if (ultimo.isEmpty()) {
-            return false;
-        }
-        ultimo.get().conferido = true;
-        repasses.save(ultimo.get());
-        pixNovo = true;
-        log.info("Repasse {}: falha conferida no painel; repasses novos liberados", ultimo.get().id);
-        return true;
     }
 
     void avancar(Repasse r) {

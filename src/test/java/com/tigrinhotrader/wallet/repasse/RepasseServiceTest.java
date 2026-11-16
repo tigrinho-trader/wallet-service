@@ -88,7 +88,7 @@ class RepasseServiceTest {
 
     private RepasseService servico(boolean habilitado, String derivEndereco) {
         RepasseProperties props = new RepasseProperties(habilitado, BigDecimal.ZERO, "chave", derivEndereco,
-                "rpc", "deriv", "token", "app", Duration.ofHours(3), Duration.ofHours(6), Duration.ofMinutes(5));
+                "rpc", "deriv", "token", "app", Duration.ofHours(3), Duration.ofMinutes(1), Duration.ofMinutes(5));
         Clock relogio = new Clock() {
             public ZoneOffset getZone() { return ZoneOffset.UTC; }
             public Clock withZone(java.time.ZoneId z) { return this; }
@@ -188,12 +188,12 @@ class RepasseServiceTest {
     }
 
     @Test
-    void falhaConferidaNoPainelLiberaORepasseNovoSemEsperarAs6Horas() {
+    void depoisDeUmaFalhaTentaDeNovoUmMinutoDepoisENaoMaisSeisHoras() {
         when(repasses.findTop10ByOrderByCriadoEmDesc()).thenAnswer(i -> new ArrayList<>(banco));
         Repasse falhou = new Repasse(new BigDecimal("40.00"), agora.minus(Duration.ofHours(4)));
         falhou.etapa = Etapa.FALHOU;
         falhou.erro = "passou do prazo de 3h parado em AGUARDANDO_DERIV";
-        falhou.atualizadoEm = agora.minus(Duration.ofMinutes(30));
+        falhou.atualizadoEm = agora.minus(Duration.ofSeconds(30));
         banco.add(falhou);
         compra("57.21");
         binanceAbrePedidoComCodigo("57.21");
@@ -202,19 +202,17 @@ class RepasseServiceTest {
         RepasseService servico = servico(true, DERIV);
 
         servico.ciclo();
-        assertThat(banco).hasSize(1);                                       // a falha segura por 6 h
+        assertThat(banco).hasSize(1);                                       // falhou ha 30 s: espera o minuto
         RepasseService.Situacao situacao = servico.situacao();
-        assertThat(situacao.bloqueadoAte()).isEqualTo(agora.plus(Duration.ofMinutes(330)));
+        assertThat(situacao.bloqueadoAte()).isEqualTo(agora.plusSeconds(30));
         assertThat(situacao.naFila()).isEqualTo(1);
         assertThat(situacao.valorNaFila()).isEqualByComparingTo("57.21");
         assertThat(situacao.motivo()).contains("falhou");
         assertThat(situacao.repasses()).extracting(RepasseService.Resumo::etapa).containsExactly("FALHOU");
 
-        assertThat(servico.liberarAposFalha()).isTrue();
-        assertThat(servico.liberarAposFalha()).isFalse();                  // ja conferida
-        assertThat(servico.situacao().bloqueadoAte()).isNull();
+        agora = agora.plusSeconds(31);
         servico.ciclo();
-        assertThat(banco).hasSize(2);                                       // o repasse novo comecou
+        assertThat(banco).hasSize(2);                                       // passou o minuto: o repasse novo comecou
         assertThat(banco.get(1).etapa).isEqualTo(Etapa.PIX_ENVIADO);
     }
 

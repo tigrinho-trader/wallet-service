@@ -15,7 +15,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
 import com.tigrinhotrader.wallet.repasse.RepasseService;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -63,15 +62,6 @@ public class PainelCarteiraController {
         return repasse.situacao();
     }
 
-    public record Liberacao(boolean liberado, RepasseService.Situacao situacao) {
-    }
-
-    /** "Conferi a falha": a ultima falha deixa de segurar os repasses novos. */
-    @PostMapping("/repasse/liberar")
-    public Liberacao liberarRepasse() {
-        boolean liberado = repasse.liberarAposFalha();
-        return new Liberacao(liberado, repasse.situacao());
-    }
 
     @GetMapping("/poupanca")
     public PoupancaResponse poupanca() {

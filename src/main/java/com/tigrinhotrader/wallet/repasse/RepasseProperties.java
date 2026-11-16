@@ -14,7 +14,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param derivEndereco  DERIV_USDT_BSC_ADDRESS: endereco de deposito USDT (BEP20) da Deriv
  * @param derivToken     DERIV_API_TOKEN: precisa da permissao "payment" (carteira e transferencias)
  * @param prazoMaximo    um repasse parado ha mais tempo que isso e marcado como falho
- * @param esperaAposFalha depois de uma falha, espera isso antes de iniciar outro repasse
+ * @param esperaAposFalha depois de uma falha, espera isso antes de tentar de novo (1 min: so para nao martelar o Asaas e
+ *                        a Binance a cada ciclo quando algo esta fora do ar)
  * @param consultaOciosa sem repasse em andamento e sem Pix novo, consulta o saldo do Asaas a cada este tempo
  */
 @ConfigurationProperties("wallet.repasse")
@@ -28,6 +29,6 @@ public record RepasseProperties(
         @DefaultValue("") String derivToken,
         @DefaultValue("") String derivAppId,
         @DefaultValue("3h") Duration prazoMaximo,
-        @DefaultValue("6h") Duration esperaAposFalha,
+        @DefaultValue("1m") Duration esperaAposFalha,
         @DefaultValue("5m") Duration consultaOciosa) {
 }

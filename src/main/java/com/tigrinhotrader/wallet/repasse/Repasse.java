@@ -84,9 +84,6 @@ public class Repasse {
     @Column(length = 500)
     String erro;
 
-    /** O super-admin conferiu esta falha no painel: a espera depois dela nao segura mais os repasses novos. */
-    Boolean conferido;
-
     @Column(nullable = false)
     Instant criadoEm;
 
@@ -126,10 +123,6 @@ public class Repasse {
 
     public Instant getAtualizadoEm() {
         return atualizadoEm;
-    }
-
-    public boolean isConferido() {
-        return Boolean.TRUE.equals(conferido);
     }
 
     /** Onde o dinheiro esta nesta etapa (nulo = confira manualmente). */

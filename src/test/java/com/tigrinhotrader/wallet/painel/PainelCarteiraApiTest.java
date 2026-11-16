@@ -71,17 +71,11 @@ class PainelCarteiraApiTest {
     @Test
     void situacaoDoRepasseSoParaOPainel() throws Exception {
         mvc.perform(get("/painel/repasse")).andExpect(status().isForbidden());
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/painel/repasse/liberar"))
-                .andExpect(status().isForbidden());
         // nos testes o repasse fica desligado (sem as chaves do Asaas, da Binance e da carteira ponte)
         mvc.perform(get("/painel/repasse").header(ADMIN, "super-admin-oscar"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.ativo").value(false))
                 .andExpect(jsonPath("$.motivo").value(org.hamcrest.Matchers.startsWith("Repasse desligado")));
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/painel/repasse/liberar")
-                        .header(ADMIN, "super-admin-oscar"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.liberado").value(false));               // nenhuma falha para conferir
     }
 
     @Test
