@@ -188,6 +188,47 @@ class RepasseServiceTest {
     }
 
     @Test
+    void falhaConferidaNoPainelLiberaORepasseNovoSemEsperarAs6Horas() {
+        when(repasses.findTop10ByOrderByCriadoEmDesc()).thenAnswer(i -> new ArrayList<>(banco));
+        Repasse falhou = new Repasse(new BigDecimal("40.00"), agora.minus(Duration.ofHours(4)));
+        falhou.etapa = Etapa.FALHOU;
+        falhou.erro = "passou do prazo de 3h parado em AGUARDANDO_DERIV";
+        falhou.atualizadoEm = agora.minus(Duration.ofMinutes(30));
+        banco.add(falhou);
+        compra("57.21");
+        binanceAbrePedidoComCodigo("57.21");
+        when(binance.livre("BRL")).thenReturn(BigDecimal.ZERO);
+        when(asaas.pagarPix(anyString(), any(), anyString())).thenReturn(new AsaasCaixa.Pix("PIX1", "PENDING", null));
+        RepasseService servico = servico(true, DERIV);
+
+        servico.ciclo();
+        assertThat(banco).hasSize(1);                                       // a falha segura por 6 h
+        RepasseService.Situacao situacao = servico.situacao();
+        assertThat(situacao.bloqueadoAte()).isEqualTo(agora.plus(Duration.ofMinutes(330)));
+        assertThat(situacao.naFila()).isEqualTo(1);
+        assertThat(situacao.valorNaFila()).isEqualByComparingTo("57.21");
+        assertThat(situacao.motivo()).contains("falhou");
+        assertThat(situacao.repasses()).extracting(RepasseService.Resumo::etapa).containsExactly("FALHOU");
+
+        assertThat(servico.liberarAposFalha()).isTrue();
+        assertThat(servico.liberarAposFalha()).isFalse();                  // ja conferida
+        assertThat(servico.situacao().bloqueadoAte()).isNull();
+        servico.ciclo();
+        assertThat(banco).hasSize(2);                                       // o repasse novo comecou
+        assertThat(banco.get(1).etapa).isEqualTo(Etapa.PIX_ENVIADO);
+    }
+
+    @Test
+    void situacaoDizQuandoAFilaAindaEstaAbaixoDoMinimoDaBinance() {
+        when(repasses.findTop10ByOrderByCriadoEmDesc()).thenAnswer(i -> new ArrayList<>(banco));
+        compra("15.00");                                                    // 5 USDT x 1,02 x 5,47 = R$ 27,90
+        RepasseService.Situacao situacao = servico(true, DERIV).situacao();
+        assertThat(situacao.minimoReais()).isEqualByComparingTo("27.90");
+        assertThat(situacao.motivo()).startsWith("Juntando");
+        assertThat(servico(false, DERIV).situacao().motivo()).startsWith("Repasse desligado");
+    }
+
+    @Test
     void servicoQueParouNoMeioDoPagamentoNuncaPagaDeNovo() {
         Repasse r = new Repasse(new BigDecimal("57.21"), agora);
         r.etapa = Etapa.PAGANDO;

@@ -13,7 +13,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.util.StringUtils;
+import com.tigrinhotrader.wallet.repasse.RepasseService;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -46,10 +48,29 @@ public class PainelCarteiraController {
 
     private final CarteiraRepository carteiras;
     private final TransacaoRepository transacoes;
+    private final RepasseService repasse;
 
-    public PainelCarteiraController(CarteiraRepository carteiras, TransacaoRepository transacoes) {
+    public PainelCarteiraController(CarteiraRepository carteiras, TransacaoRepository transacoes,
+                                    RepasseService repasse) {
         this.carteiras = carteiras;
         this.transacoes = transacoes;
+        this.repasse = repasse;
+    }
+
+    /** Repasse das compras de moedas para a Deriv: fila, por que esta parado e os ultimos repasses. */
+    @GetMapping("/repasse")
+    public RepasseService.Situacao repasse() {
+        return repasse.situacao();
+    }
+
+    public record Liberacao(boolean liberado, RepasseService.Situacao situacao) {
+    }
+
+    /** "Conferi a falha": a ultima falha deixa de segurar os repasses novos. */
+    @PostMapping("/repasse/liberar")
+    public Liberacao liberarRepasse() {
+        boolean liberado = repasse.liberarAposFalha();
+        return new Liberacao(liberado, repasse.situacao());
     }
 
     @GetMapping("/poupanca")

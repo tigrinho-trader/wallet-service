@@ -1,6 +1,7 @@
 package com.tigrinhotrader.wallet.repasse;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,4 +12,7 @@ public interface RepasseRepository extends JpaRepository<Repasse, UUID> {
     Optional<Repasse> findFirstByEtapaNotInOrderByCriadoEmAsc(Collection<Repasse.Etapa> finalizadas);
 
     Optional<Repasse> findFirstByOrderByCriadoEmDesc();
+
+    /** Os ultimos repasses (painel do super-admin). */
+    List<Repasse> findTop10ByOrderByCriadoEmDesc();
 }

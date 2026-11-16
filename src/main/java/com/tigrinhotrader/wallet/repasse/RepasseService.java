@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -142,10 +143,8 @@ public class RepasseService {
     }
 
     void iniciarSeHouverEntradas() {
-        var ultimo = repasses.findFirstByOrderByCriadoEmDesc();
-        if (ultimo.isPresent() && ultimo.get().etapa == Etapa.FALHOU
-                && ultimo.get().atualizadoEm.plus(props.esperaAposFalha()).isAfter(relogio.instant())) {
-            return; // da tempo de conferir a falha antes de mover mais dinheiro
+        if (bloqueadoAte().isPresent()) {
+            return; // da tempo de conferir a falha antes de mover mais dinheiro (ou liberar no painel)
         }
         List<EntradaRepasse> fila = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc();
         if (fila.isEmpty()) {
@@ -182,6 +181,93 @@ public class RepasseService {
         repasses.save(r);
         log.info("Repasse {}: iniciado com R$ {} ({} compra(s))", r.id, valor, fila.size());
         avancar(r);
+    }
+
+    /**
+     * Ate quando a ultima falha segura os repasses novos ({@code esperaAposFalha} depois dela), ou vazio. Uma falha
+     * conferida no painel nao segura.
+     */
+    Optional<Instant> bloqueadoAte() {
+        return repasses.findFirstByOrderByCriadoEmDesc()
+                .filter(r -> r.etapa == Etapa.FALHOU && !r.isConferido())
+                .map(r -> r.atualizadoEm.plus(props.esperaAposFalha()))
+                .filter(ate -> ate.isAfter(relogio.instant()));
+    }
+
+    /** Um repasse para o painel. */
+    public record Resumo(UUID id, String etapa, String ondeEstaODinheiro, BigDecimal valorReais, Instant criadoEm,
+                         Instant atualizadoEm, String erro, boolean conferido) {
+        static Resumo de(Repasse r) {
+            return new Resumo(r.getId(), r.getEtapa().name(), r.getOndeEstaODinheiro(), r.getValorReais(),
+                    r.getCriadoEm(), r.getAtualizadoEm(), r.getErro(), r.isConferido());
+        }
+    }
+
+    /**
+     * Situacao do repasse para o painel do super-admin: compras na fila (e quanto somam), o minimo para sacar da
+     * Binance em reais (nulo se nao deu para consultar), ate quando uma falha segura os novos, por que esta parado e
+     * os ultimos repasses.
+     */
+    public record Situacao(boolean ativo, int naFila, BigDecimal valorNaFila, BigDecimal minimoReais,
+                           Instant bloqueadoAte, String motivo, List<Resumo> repasses) {
+    }
+
+    /** So leitura (sem a trava do ciclo, que pode estar esperando a Binance). */
+    public Situacao situacao() {
+        List<EntradaRepasse> fila = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc();
+        BigDecimal valor = fila.stream().map(EntradaRepasse::reservado).reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        Instant bloqueado = bloqueadoAte().orElse(null);
+        Optional<Repasse> emAndamento = repasses.findFirstByEtapaNotInOrderByCriadoEmAsc(FINALIZADAS);
+        BigDecimal minimo = ativo ? minimoEmReais() : null;
+        String motivo;
+        if (!ativo) {
+            motivo = "Repasse desligado: falta configuracao no ambiente do wallet-service (veja o log da subida)";
+        } else if (emAndamento.isPresent()) {
+            Repasse r = emAndamento.get();
+            motivo = "Repasse em andamento (" + r.etapa + "): o dinheiro esta em "
+                    + (r.etapa.ondeEstaODinheiro == null ? "transito" : r.etapa.ondeEstaODinheiro);
+        } else if (bloqueado != null) {
+            motivo = "A ultima tentativa falhou: os repasses novos esperam ate a falha ser conferida (ou ate o horario)";
+        } else if (fila.isEmpty()) {
+            motivo = "Nada na fila: so as compras de moedas pelo jogo vao para a Binance";
+        } else if (minimo != null && valor.compareTo(minimo) < 0) {
+            motivo = "Juntando: a fila ainda esta abaixo do saque minimo de USDT da Binance";
+        } else {
+            motivo = "Na fila: o proximo ciclo (ate 15 s) inicia o repasse";
+        }
+        return new Situacao(ativo, fila.size(), valor, minimo, bloqueado, motivo,
+                repasses.findTop10ByOrderByCriadoEmDesc().stream().map(Resumo::de).toList());
+    }
+
+    /** Saque minimo de USDT da Binance (com a folga) em reais, ou nulo se nao deu para consultar. */
+    private BigDecimal minimoEmReais() {
+        try {
+            BigDecimal minimo = binance.redeBsc("USDT").minimo().multiply(FOLGA_MINIMO)
+                    .multiply(binance.preco("USDTBRL")).setScale(2, RoundingMode.UP);
+            return minimo.max(props.minimoReais());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * O super-admin conferiu a ultima falha no painel: ela deixa de segurar os repasses novos e o proximo ciclo (ate
+     * 15 s) ja olha a fila. Nao refaz nada do repasse que falhou.
+     *
+     * @return false se a ultima nao e uma falha (ou ja foi conferida)
+     */
+    public synchronized boolean liberarAposFalha() {
+        Optional<Repasse> ultimo = repasses.findFirstByOrderByCriadoEmDesc()
+                .filter(r -> r.etapa == Etapa.FALHOU && !r.isConferido());
+        if (ultimo.isEmpty()) {
+            return false;
+        }
+        ultimo.get().conferido = true;
+        repasses.save(ultimo.get());
+        pixNovo = true;
+        log.info("Repasse {}: falha conferida no painel; repasses novos liberados", ultimo.get().id);
+        return true;
     }
 
     void avancar(Repasse r) {
