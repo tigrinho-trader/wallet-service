@@ -1,5 +1,6 @@
 package com.tigrinhotrader.wallet.servico;
 
+import com.tigrinhotrader.wallet.painel.Poupanca;
 import com.tigrinhotrader.wallet.dominio.Carteira;
 import com.tigrinhotrader.wallet.dominio.CarteiraRepository;
 import com.tigrinhotrader.wallet.dominio.TipoTransacao;
@@ -194,7 +195,9 @@ public class CarteiraService {
             log.info("Rodada {} ja aplicada, ignorando evento repetido", referencia);
             return false;
         }
-        Carteira carteira = obterOuCriar(evento.usuarioId());
+        boolean poupanca = Poupanca.CARTEIRA.equals(evento.usuarioId());
+        // a carteira de poupanca do super-admin nasce sem o bonus de boas-vindas dos jogadores
+        Carteira carteira = poupanca ? carteiraDePoupanca() : obterOuCriar(evento.usuarioId());
         Instant agora = relogio.instant();
         BigDecimal aplicado = carteira.aplicarResultado(evento.valorLiquido(), agora);
         TipoTransacao tipo = switch (aplicado.signum()) {
@@ -202,9 +205,15 @@ public class CarteiraService {
             case -1 -> TipoTransacao.PERDA_RODADA;
             default -> TipoTransacao.EMPATE_RODADA;
         };
-        registrar(carteira, tipo, aplicado, referencia,
-                "Rodada " + evento.tipo() + " " + evento.simbolo() + ": " + evento.resultado(), agora);
+        String descricao = poupanca ? "Poupança de uma flecha vencedora (" + evento.simbolo() + ")"
+                : "Rodada " + evento.tipo() + " " + evento.simbolo() + ": " + evento.resultado();
+        registrar(carteira, tipo, aplicado, referencia, descricao, agora);
         return true;
+    }
+
+    private Carteira carteiraDePoupanca() {
+        return carteiras.findById(Poupanca.CARTEIRA)
+                .orElseGet(() -> carteiras.save(new Carteira(Poupanca.CARTEIRA, BigDecimal.ZERO, relogio.instant())));
     }
 
     private ResultadoPagamento aprovar(String usuarioId, BigDecimal valor, Operacao operacao) {
