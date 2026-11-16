@@ -81,11 +81,11 @@ class CompraPixApiTest {
                 .andExpect(jsonPath("$.pixHabilitado").value(true))
                 .andExpect(jsonPath("$.sandboxHabilitado").value(true))
                 .andExpect(jsonPath("$.pacotes", hasSize(4)))
-                .andExpect(jsonPath("$.pacotes[0]").value(10))
-                .andExpect(jsonPath("$.pacotes[3]").value(100))
+                .andExpect(jsonPath("$.pacotes[0]").value(30))
+                .andExpect(jsonPath("$.pacotes[3]").value(200))
                 // 1 real = 1 moeda
                 .andExpect(jsonPath("$.centavosPorMoeda").value(100))
-                .andExpect(jsonPath("$.minimoMoedas").value(5))
+                .andExpect(jsonPath("$.minimoMoedas").value(30))   // padrao: R$ 30
                 .andExpect(jsonPath("$.maximoMoedas").value(2000));
     }
 
@@ -109,20 +109,38 @@ class CompraPixApiTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.moedas").value(123))
                 .andExpect(jsonPath("$.centavos").value(12300));
-        comprar(usuario, "{\"moedas\":5}").andExpect(status().isCreated());
+        comprar(usuario, "{\"moedas\":30}").andExpect(status().isCreated());
         comprar(usuario, "{\"moedas\":2000}").andExpect(status().isCreated());
         verify(provedor).criar(anyString(), eq(12300L), eq("Flecha Certeira: 123 moedas"), eq(1800));
     }
 
     @Test
     void quantidadeForaDosLimitesE422() throws Exception {
-        for (int moedas : new int[] {4, 0, -50, 2001}) {
+        for (int moedas : new int[] {29, 0, -50, 2001}) {
             comprar(usuario, "{\"moedas\":" + moedas + "}")
                     .andExpect(status().isUnprocessableEntity())
                     .andExpect(jsonPath("$.detail").value(
-                            org.hamcrest.Matchers.containsString("compre de 5 a 2000 moedas")));
+                            org.hamcrest.Matchers.containsString("compre de 30 a 2000 moedas")));
         }
         verify(provedor, never()).criar(anyString(), anyLong(), anyString(), anyInt());
+    }
+
+    @Autowired
+    com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService configuracaoCarteira;
+
+    @Test
+    void minimoDoPixMudaPeloPainelEALojaAcompanha() throws Exception {
+        configuracaoCarteira.alterar(new com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService.Alteracao(60));
+        try {
+            mockMvc.perform(get("/carteira/compras/config").header("X-Usuario-Id", usuario))
+                    .andExpect(jsonPath("$.minimoMoedas").value(60))
+                    .andExpect(jsonPath("$.pacotes", hasSize(2)))          // 30 e 50 somem
+                    .andExpect(jsonPath("$.pacotes[0]").value(100));
+            comprar(usuario, "{\"moedas\":50}").andExpect(status().isUnprocessableEntity());
+            comprar(usuario, "{\"moedas\":60}").andExpect(status().isCreated());
+        } finally {
+            configuracaoCarteira.alterar(new com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService.Alteracao(null));
+        }
     }
 
     @Test

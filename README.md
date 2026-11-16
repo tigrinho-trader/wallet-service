@@ -45,7 +45,7 @@ Com `WALLET_SANDBOX_HABILITADO=false` (`wallet.sandbox.habilitado`) depositos e 
 | Metodo | Caminho | Descricao |
 |---|---|---|
 | GET | `/carteira/compras/config` | `{pixHabilitado, sandboxHabilitado, pacotes, centavosPorMoeda, minimoMoedas, maximoMoedas}` (limites do modo ativo: Pix ou deposito de teste) |
-| POST | `/carteira/compras` | `{"moedas":500}` cria a cobranca Pix (qualquer quantidade entre `wallet.pix.minimo-moedas` e `wallet.pix.maximo-moedas`, padrao 5 a 2.000; `wallet.pix.pacotes` sao so sugestoes da loja, padrao 10, 25, 50 e 100) e devolve QR Code (`brCodeBase64`) e copia e cola (`brCode`). 422 quantidade invalida ou cobrancas em aberto demais; 503 sem chave/provedor fora do ar |
+| POST | `/carteira/compras` | `{"moedas":500}` cria a cobranca Pix (qualquer quantidade entre o minimo e `wallet.pix.maximo-moedas`, padrao 30 a 2.000; o minimo vem de `wallet.pix.minimo-moedas` e o super-admin muda no painel, aba Regras (`PUT /painel/config`); `wallet.pix.pacotes` sao so sugestoes da loja, padrao 30, 50, 100 e 200, e as abaixo do minimo nao aparecem) e devolve QR Code (`brCodeBase64`) e copia e cola (`brCode`). 422 quantidade invalida ou cobrancas em aberto demais; 503 sem chave/provedor fora do ar |
 | GET | `/carteira/compras/{id}` | Status da compra. Se pendente, o servidor consulta o AbacatePay; quando vira `PAGA` credita as moedas **uma unica vez** (transacao `COMPRA_PIX`, referencia = id da cobranca) e devolve o `saldo` |
 | POST | `/carteira/compras/{id}/simular-pagamento` | So em modo de desenvolvimento (chave `abc_dev_`): paga a cobranca de teste no AbacatePay e credita |
 

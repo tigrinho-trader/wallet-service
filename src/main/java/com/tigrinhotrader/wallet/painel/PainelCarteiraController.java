@@ -49,13 +49,33 @@ public class PainelCarteiraController {
     private final TransacaoRepository transacoes;
     private final RepasseService repasse;
     private final FinanceiroService financeiro;
+    private final ConfiguracaoCarteiraService configuracao;
 
     public PainelCarteiraController(CarteiraRepository carteiras, TransacaoRepository transacoes,
-                                    RepasseService repasse, FinanceiroService financeiro) {
+                                    RepasseService repasse, FinanceiroService financeiro,
+                                    ConfiguracaoCarteiraService configuracao) {
         this.carteiras = carteiras;
         this.transacoes = transacoes;
         this.repasse = repasse;
         this.financeiro = financeiro;
+        this.configuracao = configuracao;
+    }
+
+    /** Regras da carteira em vigor e as do padrao (hoje: o valor minimo do Pix de compra). */
+    public record ConfigResponse(ConfiguracaoCarteiraService.Config atual, ConfiguracaoCarteiraService.Config ambiente) {
+    }
+
+    @GetMapping("/config")
+    public ConfigResponse config() {
+        return new ConfigResponse(configuracao.atual(), configuracao.doAmbiente());
+    }
+
+    /** Campo nulo volta ao padrao. */
+    @org.springframework.web.bind.annotation.PutMapping("/config")
+    public ConfigResponse alterarConfig(
+            @org.springframework.web.bind.annotation.RequestBody ConfiguracaoCarteiraService.Alteracao alteracao) {
+        configuracao.alterar(alteracao);
+        return config();
     }
 
     /**

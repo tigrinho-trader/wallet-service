@@ -23,15 +23,18 @@ public class CompraPixService {
     private final PixProperties propriedades;
     private final Clock relogio;
     private final RepasseService repasse;
+    private final com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService configuracao;
 
     public CompraPixService(CompraPixRepository compras, ProvedorPix provedor, CarteiraService carteiras,
-                            PixProperties propriedades, Clock relogio, RepasseService repasse) {
+                            PixProperties propriedades, Clock relogio, RepasseService repasse,
+                            com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService configuracao) {
         this.compras = compras;
         this.provedor = provedor;
         this.carteiras = carteiras;
         this.propriedades = propriedades;
         this.relogio = relogio;
         this.repasse = repasse;
+        this.configuracao = configuracao;
     }
 
     public boolean habilitado() {
@@ -44,8 +47,9 @@ public class CompraPixService {
         if (!habilitado()) {
             throw new PixIndisponivelException("Compra por Pix desligada (ASAAS_API_KEY nao configurada)");
         }
-        if (moedas < propriedades.minimoMoedas() || moedas > propriedades.maximoMoedas()) {
-            throw new RegraNegocioException("Quantidade invalida: compre de " + propriedades.minimoMoedas()
+        int minimo = configuracao.pixMinimoMoedas();   // o do painel (padrao 30)
+        if (moedas < minimo || moedas > propriedades.maximoMoedas()) {
+            throw new RegraNegocioException("Quantidade invalida: compre de " + minimo
                     + " a " + propriedades.maximoMoedas() + " moedas");
         }
         UUID id = UUID.randomUUID();

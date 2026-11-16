@@ -78,6 +78,24 @@ class PainelCarteiraApiTest {
                 .andExpect(jsonPath("$.jogo.perfis").exists());
     }
 
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder putConfig(String corpo) {
+        return org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/painel/config")
+                .header(ADMIN, "super-admin-oscar").contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(corpo);
+    }
+
+    @Test
+    void minimoDoPixPeloPainelComPadrao30() throws Exception {
+        mvc.perform(get("/painel/config")).andExpect(status().isForbidden());
+        mvc.perform(get("/painel/config").header(ADMIN, "super-admin-oscar"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.atual.pixMinimoMoedas").value(30))
+                .andExpect(jsonPath("$.ambiente.pixMinimoMoedas").value(30));
+        mvc.perform(putConfig("{\"pixMinimoMoedas\":50}")).andExpect(jsonPath("$.atual.pixMinimoMoedas").value(50));
+        mvc.perform(putConfig("{\"pixMinimoMoedas\":0}")).andExpect(status().isUnprocessableEntity());
+        mvc.perform(putConfig("{}")).andExpect(jsonPath("$.atual.pixMinimoMoedas").value(30));   // vazio volta ao padrao
+    }
+
     @Test
     void situacaoDoRepasseSoParaOPainel() throws Exception {
         mvc.perform(get("/painel/repasse")).andExpect(status().isForbidden());

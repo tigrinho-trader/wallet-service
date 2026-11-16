@@ -29,12 +29,15 @@ public class CompraPixController {
     private final CompraPixService compras;
     private final CarteiraService carteiras;
     private final PixProperties propriedades;
+    private final com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService configuracao;
     private final boolean sandboxHabilitado;
     private final int limiteSandbox;
 
     public CompraPixController(CompraPixService compras, CarteiraService carteiras, PixProperties propriedades,
                                @Value("${wallet.sandbox.habilitado:true}") boolean sandboxHabilitado,
-                               @Value("${wallet.sandbox.limite-por-operacao:5000.00}") BigDecimal limiteSandbox) {
+                               @Value("${wallet.sandbox.limite-por-operacao:5000.00}") BigDecimal limiteSandbox,
+                               com.tigrinhotrader.wallet.painel.ConfiguracaoCarteiraService configuracao) {
+        this.configuracao = configuracao;
         this.compras = compras;
         this.carteiras = carteiras;
         this.propriedades = propriedades;
@@ -59,11 +62,14 @@ public class CompraPixController {
                                  Instant pagaEm, BigDecimal saldo) {
     }
 
+    /** Limites em vigor: o minimo do Pix vem do painel (padrao 30); os pacotes abaixo dele nao aparecem. */
     @GetMapping("/config")
     public ConfigResponse config() {
         boolean pix = compras.habilitado();
-        return new ConfigResponse(pix, sandboxHabilitado, propriedades.pacotes(), propriedades.centavosPorMoeda(),
-                pix ? propriedades.minimoMoedas() : 1, pix ? propriedades.maximoMoedas() : limiteSandbox);
+        int minimo = pix ? configuracao.pixMinimoMoedas() : 1;
+        int maximo = pix ? propriedades.maximoMoedas() : limiteSandbox;
+        List<Integer> pacotes = propriedades.pacotes().stream().filter(p -> p >= minimo && p <= maximo).toList();
+        return new ConfigResponse(pix, sandboxHabilitado, pacotes, propriedades.centavosPorMoeda(), minimo, maximo);
     }
 
     @PostMapping
