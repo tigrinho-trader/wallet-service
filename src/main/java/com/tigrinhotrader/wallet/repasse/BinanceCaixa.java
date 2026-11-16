@@ -72,6 +72,36 @@ public class BinanceCaixa {
         return BigDecimal.ZERO;
     }
 
+    /** Saldo (livre + bloqueado) de cada ativo que tem saldo (so leitura, para o painel). */
+    public Map<String, BigDecimal> saldos() {
+        Map<String, BigDecimal> saldos = new LinkedHashMap<>();
+        for (JsonNode saldo : assinado(HttpMethod.GET, "/api/v3/account", Map.of(), null).path("balances")) {
+            BigDecimal total = new BigDecimal(saldo.path("free").asText("0"))
+                    .add(new BigDecimal(saldo.path("locked").asText("0")));
+            if (total.signum() > 0) {
+                saldos.put(saldo.path("asset").asText(), total);
+            }
+        }
+        return saldos;
+    }
+
+    /** Depositos (tipo 0) ou saques (tipo 1) em reais por Pix desde {@code desdeMs} (so leitura). */
+    public JsonNode ordensFiat(int tipo, long desdeMs) {
+        return assinado(HttpMethod.GET, "/sapi/v1/fiat/orders", Map.of("transactionType", String.valueOf(tipo),
+                "beginTime", String.valueOf(desdeMs), "rows", "50"), null).path("data");
+    }
+
+    /** Saques de cripto (o USDT para a carteira ponte) desde {@code desdeMs} (so leitura). */
+    public JsonNode saquesCripto(long desdeMs) {
+        return assinado(HttpMethod.GET, "/sapi/v1/capital/withdraw/history",
+                Map.of("startTime", String.valueOf(desdeMs), "limit", "50"), null);
+    }
+
+    /** Ultimas compras e vendas no par (ex.: USDTBRL), a mais nova por ultimo (so leitura). */
+    public JsonNode negocios(String simbolo) {
+        return assinado(HttpMethod.GET, "/api/v3/myTrades", Map.of("symbol", simbolo, "limit", "50"), null);
+    }
+
     public BigDecimal preco(String simbolo) {
         JsonNode r = http.get().uri(URI.create(url + "/api/v3/ticker/price?symbol=" + simbolo)).retrieve().body(JsonNode.class);
         return new BigDecimal(r.path("price").asText());

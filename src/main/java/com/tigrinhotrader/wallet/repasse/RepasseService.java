@@ -111,14 +111,21 @@ public class RepasseService {
 
     /** Roda {@code acao} com o caixa livre, sem nenhum ciclo do repasse no meio (para o saque conferir e pagar). */
     public synchronized <T> T comCaixaLivre(java.util.function.Function<BigDecimal, T> acao) {
+        return acao.apply(caixaLivreDe(asaas.saldo()));
+    }
+
+    /**
+     * Caixa livre a partir de um saldo do Asaas ja lido, sem a trava do ciclo (so para mostrar no painel; o saque usa
+     * {@link #comCaixaLivre}).
+     */
+    public BigDecimal caixaLivreDe(BigDecimal saldoAsaas) {
         BigDecimal reservado = entradas.findByRepasseIdIsNullOrderByCriadaEmAsc().stream()
                 .map(EntradaRepasse::reservado).reduce(BigDecimal.ZERO, BigDecimal::add);
         var emAndamento = repasses.findFirstByEtapaNotInOrderByCriadoEmAsc(FINALIZADAS);
         if (emAndamento.isPresent() && AINDA_NO_ASAAS.contains(emAndamento.get().etapa)) {
             reservado = reservado.add(emAndamento.get().valorReais);
         }
-        BigDecimal livre = asaas.saldo().subtract(reservado).max(BigDecimal.ZERO).setScale(2, RoundingMode.DOWN);
-        return acao.apply(livre);
+        return saldoAsaas.subtract(reservado).max(BigDecimal.ZERO).setScale(2, RoundingMode.DOWN);
     }
 
     @Scheduled(fixedDelayString = "${wallet.repasse.intervalo-ms:60000}",

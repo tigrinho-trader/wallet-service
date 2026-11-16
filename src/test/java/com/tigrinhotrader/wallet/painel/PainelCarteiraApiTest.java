@@ -69,6 +69,16 @@ class PainelCarteiraApiTest {
     }
 
     @Test
+    void painelFinanceiroSoParaOPainelECadaParteDizSeEstaConfigurada() throws Exception {
+        mvc.perform(get("/painel/financeiro")).andExpect(status().isForbidden());
+        mvc.perform(get("/painel/financeiro").param("dias", "30").header(ADMIN, "super-admin-oscar"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dias").value(30))
+                .andExpect(jsonPath("$.asaas.erro").value("não configurado neste ambiente"))
+                .andExpect(jsonPath("$.jogo.perfis").exists());
+    }
+
+    @Test
     void situacaoDoRepasseSoParaOPainel() throws Exception {
         mvc.perform(get("/painel/repasse")).andExpect(status().isForbidden());
         // nos testes o repasse fica desligado (sem as chaves do Asaas, da Binance e da carteira ponte)

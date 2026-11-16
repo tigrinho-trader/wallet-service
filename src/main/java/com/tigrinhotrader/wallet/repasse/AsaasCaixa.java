@@ -39,6 +39,15 @@ public class AsaasCaixa {
                 .path("balance").decimalValue();
     }
 
+    /**
+     * Extrato desde {@code desde} (so leitura, para o painel): cada movimento com valor (+ entrou, - saiu), saldo depois
+     * dele, tipo (PAYMENT_RECEIVED, PAYMENT_FEE, TRANSFER, PIX_TRANSACTION_DEBIT...), data e descricao.
+     */
+    public JsonNode extrato(java.time.LocalDate desde, int limite) {
+        return chamar(() -> http.get().uri("/financialTransactions?startDate={desde}&offset=0&limit={limite}",
+                desde.toString(), limite).retrieve().body(JsonNode.class)).path("data");
+    }
+
     public record Pix(String id, String status, String motivo) {
         public boolean concluido() {
             return "DONE".equals(status);

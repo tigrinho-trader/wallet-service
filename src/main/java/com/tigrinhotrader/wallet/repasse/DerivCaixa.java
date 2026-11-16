@@ -75,6 +75,16 @@ public class DerivCaixa {
         throw new RepasseException("Carteira principal da Deriv nao encontrada");
     }
 
+    /** Saldo da conta Options real (onde as flechas operam), na moeda dela (USD). */
+    public record SaldoOptions(String conta, BigDecimal saldo, String moeda) {
+    }
+
+    public SaldoOptions saldoOptions() {
+        JsonNode conta = contaOptionsReal();
+        return new SaldoOptions(conta.path("account_id").asText(), new BigDecimal(conta.path("balance").asText("0")),
+                conta.path("currency").asText("USD"));
+    }
+
     JsonNode contaOptionsReal() {
         for (JsonNode conta : chamar(() -> http.get().uri("/trading/v1/options/accounts").retrieve().body(JsonNode.class))
                 .path("data")) {

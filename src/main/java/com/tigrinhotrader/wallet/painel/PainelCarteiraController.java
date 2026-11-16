@@ -48,12 +48,24 @@ public class PainelCarteiraController {
     private final CarteiraRepository carteiras;
     private final TransacaoRepository transacoes;
     private final RepasseService repasse;
+    private final FinanceiroService financeiro;
 
     public PainelCarteiraController(CarteiraRepository carteiras, TransacaoRepository transacoes,
-                                    RepasseService repasse) {
+                                    RepasseService repasse, FinanceiroService financeiro) {
         this.carteiras = carteiras;
         this.transacoes = transacoes;
         this.repasse = repasse;
+        this.financeiro = financeiro;
+    }
+
+    /**
+     * Painel financeiro: saldos e fluxo do Asaas, da Binance, da carteira ponte e da Deriv, mais o lado do jogo.
+     * {@code dias}: 1 = hoje, 7 = hoje e os 6 dias antes (padrao), ate 90.
+     */
+    @GetMapping("/financeiro")
+    public FinanceiroService.Financeiro financeiro(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "7") int dias) {
+        return financeiro.financeiro(dias);
     }
 
     /** Repasse das compras de moedas para a Deriv: fila, por que esta parado e os ultimos repasses. */
