@@ -117,4 +117,66 @@ class CaixasRepasseTest {
         assertThat(deriv.transferirParaOptions(id)).isEqualByComparingTo("31.31");
         servidor.verify();
     }
+
+    @Test
+    void depositoCreditadoEmUsdtTambemVaiParaAOptions() {
+        // a Deriv passou a creditar os depositos BSC no saldo "USDT" (o "USDT_BSC" ficou zerado)
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer servidor = MockRestServiceServer.bindTo(builder).build();
+        DerivCaixa deriv = new DerivCaixa(builder, "https://deriv.test", "tok", "app");
+        UUID id = UUID.fromString("00000000-0000-0000-0000-000000000042");
+        String carteiras = "{\"data\":{\"wallets\":[{\"type\":\"main\",\"wallet_id\":\"W1\",\"balances\":{"
+                + "\"USDT\":{\"balance\":\"17.29\"},\"USDT_BSC\":{\"balance\":\"0\"},\"BTC\":{\"balance\":\"1\"}}},"
+                + "{\"type\":\"p2p\",\"wallet_id\":\"P\",\"balances\":{}}]}}";
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/wallets"))
+                .andRespond(withSuccess(carteiras, MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/wallets"))
+                .andRespond(withSuccess(carteiras, MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/trading/v1/options/accounts"))
+                .andRespond(withSuccess("{\"data\":[{\"account_id\":\"ROT1\",\"account_type\":\"real\",\"status\":\"active\",\"currency\":\"USD\"}]}",
+                        MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/exchange-rate?source_currency=USDT&destination_currency=USD"))
+                .andRespond(withSuccess("{\"data\":{\"exchange_rate\":\"0.998430564999\",\"rate_token\":\"RT\"}}", MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/transfers/platforms"))
+                .andExpect(content().json("{\"wallet_id\":\"W1\",\"platform_account_id\":\"ROT1\",\"amount\":\"17.26\","
+                        + "\"currency\":\"USD\",\"wallet_currency\":\"USDT\",\"request_id\":\""
+                        + DerivCaixa.idDaMoeda(id, "USDT") + "\"}"))
+                .andRespond(withSuccess("{\"data\":{\"status\":\"TransferSuccessful\"}}", MediaType.APPLICATION_JSON));
+
+        // o saldo conta o USDT (o BTC fica de fora): o repasse ve o deposito chegar
+        assertThat(deriv.carteiraPrincipal().saldo()).isEqualByComparingTo("17.29");
+        assertThat(deriv.transferirParaOptions(id)).isEqualByComparingTo("17.26");
+        servidor.verify();
+    }
+
+    @Test
+    void comSaldoNasDuasMoedasFazUmaTransferenciaPorMoeda() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer servidor = MockRestServiceServer.bindTo(builder).build();
+        DerivCaixa deriv = new DerivCaixa(builder, "https://deriv.test", "tok", "app");
+        UUID id = UUID.fromString("00000000-0000-0000-0000-000000000042");
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/wallets"))
+                .andRespond(withSuccess("{\"data\":{\"wallets\":[{\"type\":\"main\",\"wallet_id\":\"W1\",\"balances\":{"
+                        + "\"USDT_BSC\":{\"balance\":\"10\"},\"USDT\":{\"balance\":\"5\"},\"USDT_TRC20\":{\"balance\":\"0.5\"}}}]}}",
+                        MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/trading/v1/options/accounts"))
+                .andRespond(withSuccess("{\"data\":[{\"account_id\":\"ROT1\",\"account_type\":\"real\",\"status\":\"active\",\"currency\":\"USD\"}]}",
+                        MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/exchange-rate?source_currency=USDT_BSC&destination_currency=USD"))
+                .andRespond(withSuccess("{\"data\":{\"exchange_rate\":\"1\",\"rate_token\":\"R1\"}}", MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/transfers/platforms"))
+                .andExpect(content().json("{\"amount\":\"10.00\",\"wallet_currency\":\"USDT_BSC\","
+                        + "\"request_id\":\"00000000-0000-0000-0000-000000000042\"}"))
+                .andRespond(withSuccess("{\"data\":{}}", MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/exchange-rate?source_currency=USDT&destination_currency=USD"))
+                .andRespond(withSuccess("{\"data\":{\"exchange_rate\":\"1\",\"rate_token\":\"R2\"}}", MediaType.APPLICATION_JSON));
+        servidor.expect(requestTo("https://deriv.test/wallet/v1/transfers/platforms"))
+                .andExpect(content().json("{\"amount\":\"5.00\",\"wallet_currency\":\"USDT\",\"rate_token\":\"R2\"}"))
+                .andRespond(withSuccess("{\"data\":{}}", MediaType.APPLICATION_JSON));
+
+        // 0,5 USDT_TRC20 fica (abaixo do minimo de 1)
+        assertThat(deriv.transferirParaOptions(id)).isEqualByComparingTo("15.00");
+        servidor.verify();
+        assertThat(DerivCaixa.idDaMoeda(id, "USDT")).isNotEqualTo(id).isEqualTo(DerivCaixa.idDaMoeda(id, "USDT"));
+    }
 }
